@@ -7,6 +7,8 @@
   const CHECKBOX_CLASS = "ccm-conversation-checkbox";
   const ENHANCED_ATTR = "data-ccm-enhanced";
   const DELETE_DELAY_MS = 1400;
+  const USAGE_STORAGE_KEY = "ccmUsageStats";
+  const DEFAULT_MODEL_LABEL = "Unknown model";
 
   const state = {
     observer: null,
@@ -15,11 +17,17 @@
     isDeleting: false,
     lastEstimate: null,
     logs: [],
-    selectedConversationKeys: new Set()
+    selectedConversationKeys: new Set(),
+    usageTrackingInstalled: false,
+    pendingUsageTimer: null,
+    lastUsageSignature: "",
+    lastUsageStartedAt: 0,
+    memoryUsageStats: createEmptyUsageStats()
   };
 
   function init() {
     installMessageBridge();
+    installUsageTracking();
     exposeTestApi();
   }
 
@@ -94,6 +102,21 @@
           status: getStatus()
         });
 
+      case "CCM_RECORD_USAGE_NOW": {
+        const usageStats = await recordModelUsage("manual-popup");
+        return ok({
+          message: `Recorded one ${usageStats.lastModelLabel} use.`,
+          status: getStatus(),
+          usageStats
+        });
+      }
+
+      case "CCM_GET_USAGE_STATS":
+        return ok({
+          status: getStatus(),
+          usageStats: await readUsageStats()
+        });
+
       default:
         throw new Error("Unknown extension action.");
     }
@@ -129,6 +152,361 @@
       childList: true,
       subtree: true
     });
+  }
+
+  function installUsageTracking() {
+    if (state.usageTrackingInstalled || !document.body) {
+      return;
+    }
+
+    state.usageTrackingInstalled = true;
+
+    document.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const button = target ? target.closest("button,[role='button']") : null;
+      if (button && isLikelySendButton(button)) {
+        scheduleUsageRecord("send-button", button);
+      }
+    }, true);
+
+    document.addEventListener("submit", (event) => {
+      if (event.target instanceof Element && isLikelyComposerForm(event.target)) {
+        scheduleUsageRecord("composer-submit", event.target);
+      }
+    }, true);
+
+    document.addEventListener("keydown", (event) => {
+      if (isLikelyComposerEnter(event)) {
+        scheduleUsageRecord("enter-key", event.target);
+      }
+    }, true);
+  }
+
+  function isLikelySendButton(button) {
+    if (!button || isInsideExtensionUi(button) || !isVisibleElement(button)) {
+      return false;
+    }
+
+    if (button.disabled || button.getAttribute("aria-disabled") === "true") {
+      return false;
+    }
+
+    const label = cleanText([
+      button.getAttribute("data-testid"),
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+      button.textContent
+    ].filter(Boolean).join(" "));
+    const hasSendLabel = /(send|submit|发送|提交|傳送|送出)/i.test(label);
+    const hasSendTestId = /send/i.test(button.getAttribute("data-testid") || "");
+
+    return (hasSendLabel || hasSendTestId) && (hasSendTestId || Boolean(findNearbyComposerInput(button)));
+  }
+
+  function isLikelyComposerForm(form) {
+    if (!form || isInsideExtensionUi(form)) {
+      return false;
+    }
+
+    return Boolean(form.querySelector("textarea,[contenteditable='true'],[role='textbox']"));
+  }
+
+  function isLikelyComposerEnter(event) {
+    if (!event || event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+      return false;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || isInsideExtensionUi(target)) {
+      return false;
+    }
+
+    const isTextInput = target.matches("textarea,[contenteditable='true'],[role='textbox']");
+    if (!isTextInput || !hasComposerContent(target)) {
+      return false;
+    }
+
+    return Boolean(target.closest("form,[data-testid*='composer' i],[class*='composer' i]")) ||
+      target.getAttribute("aria-label")?.toLowerCase().includes("message") ||
+      target.getAttribute("placeholder")?.toLowerCase().includes("message");
+  }
+
+  function findNearbyComposerInput(element) {
+    let node = element;
+    for (let depth = 0; node && depth < 8; depth += 1) {
+      if (node.querySelector) {
+        const input = node.querySelector("textarea,[contenteditable='true'],[role='textbox']");
+        if (input) {
+          return input;
+        }
+      }
+      node = node.parentElement;
+    }
+
+    return document.querySelector("form textarea, form [contenteditable='true'], form [role='textbox']");
+  }
+
+  function hasComposerContent(element) {
+    const input = element && element.matches && element.matches("textarea,[contenteditable='true'],[role='textbox']")
+      ? element
+      : findNearbyComposerInput(element);
+    if (!input) {
+      return true;
+    }
+
+    const text = "value" in input ? input.value : input.textContent;
+    return cleanText(text).length > 0;
+  }
+
+  function scheduleUsageRecord(reason, sourceElement) {
+    if (sourceElement && !hasComposerContent(sourceElement)) {
+      return;
+    }
+
+    const now = Date.now();
+    const modelLabel = detectCurrentModelLabel();
+    const conversationKey = getCurrentConversationKey();
+    const signature = `${conversationKey}|${modelLabel}|${Math.floor(now / 2500)}`;
+
+    if (signature === state.lastUsageSignature || now - state.lastUsageStartedAt < 900) {
+      return;
+    }
+
+    state.lastUsageSignature = signature;
+    state.lastUsageStartedAt = now;
+    window.clearTimeout(state.pendingUsageTimer);
+    state.pendingUsageTimer = window.setTimeout(() => {
+      recordModelUsage(reason, modelLabel).catch((error) => {
+        logMessage(`Usage count failed: ${error.message}`);
+      });
+    }, 500);
+  }
+
+  async function recordModelUsage(reason, modelLabel) {
+    const label = normalizeModelLabel(modelLabel || detectCurrentModelLabel());
+    const stats = normalizeUsageStats(await readUsageStats());
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const day = localDateKey(now);
+    const modelStats = stats.models[label] || {
+      total: 0,
+      dates: {},
+      lastUsedAt: null
+    };
+
+    stats.total += 1;
+    stats.lastModelLabel = label;
+    stats.lastRecordedAt = nowIso;
+    modelStats.total += 1;
+    modelStats.dates[day] = (modelStats.dates[day] || 0) + 1;
+    modelStats.lastUsedAt = nowIso;
+    stats.models[label] = modelStats;
+    stats.events.unshift({
+      id: `${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+      model: label,
+      at: nowIso,
+      day,
+      reason,
+      conversation: getCurrentConversationKey()
+    });
+    stats.events = stats.events.slice(0, 80);
+
+    await writeUsageStats(stats);
+    logMessage(`Recorded usage: ${label}. Total tracked sends: ${stats.total}.`);
+    return stats;
+  }
+
+  async function resetModelUsage() {
+    const stats = createEmptyUsageStats();
+    await writeUsageStats(stats);
+    logMessage("Usage statistics reset.");
+    return stats;
+  }
+
+  function detectCurrentModelLabel() {
+    const candidates = collectModelLabelCandidates();
+    for (const candidate of candidates) {
+      const label = normalizeModelLabel(candidate);
+      if (label && label !== DEFAULT_MODEL_LABEL) {
+        return label;
+      }
+    }
+
+    return DEFAULT_MODEL_LABEL;
+  }
+
+  function collectModelLabelCandidates() {
+    const explicitSelectors = [
+      '[data-testid*="model" i]',
+      '[aria-label*="model" i]',
+      '[title*="model" i]',
+      '[data-model]'
+    ].join(",");
+    const roots = [
+      document.querySelector("header"),
+      document.querySelector('[role="banner"]'),
+      document.querySelector("main"),
+      document.body
+    ].filter(Boolean);
+    const candidates = [];
+    const seen = new Set();
+
+    function addText(element) {
+      if (!element || seen.has(element) || isInsideExtensionUi(element) || !isVisibleElement(element)) {
+        return;
+      }
+      seen.add(element);
+
+      const text = cleanText([
+        element.getAttribute("data-model"),
+        element.getAttribute("aria-label"),
+        element.getAttribute("title"),
+        element.textContent
+      ].filter(Boolean).join(" "));
+
+      if (text) {
+        candidates.push(text);
+      }
+    }
+
+    roots.forEach((root) => {
+      root.querySelectorAll(explicitSelectors).forEach(addText);
+    });
+    roots.slice(0, 3).forEach((root) => {
+      root.querySelectorAll("button,[role='button']").forEach((element) => {
+        const text = getAccessibleText(element);
+        if (looksLikeModelLabel(text)) {
+          addText(element);
+        }
+      });
+    });
+
+    return candidates;
+  }
+
+  function normalizeModelLabel(text) {
+    const source = cleanText(text)
+      .replace(/\b(model selector|selected model|current model|switch model|choose model)\b[:\s-]*/ig, "")
+      .replace(/\b(selected|current)\b/ig, "")
+      .trim();
+
+    if (!source) {
+      return DEFAULT_MODEL_LABEL;
+    }
+
+    const patterns = [
+      /ChatGPT\s+(?:Pro|Plus|Team|Enterprise|Free|Go)/i,
+      /GPT[-\s]?(?:5|4o|4\.1|4|3\.5)(?:\s*(?:Thinking|mini|Turbo|Pro|High|Medium|Low))?/i,
+      /\b(?:o1|o3|o4)(?:[-\s]?(?:mini|pro|high|medium|low))?\b/i,
+      /Deep\s+Research/i,
+      /Research\s+preview/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = source.match(pattern);
+      if (match) {
+        return cleanText(match[0]).replace(/\bgpt\b/i, "GPT");
+      }
+    }
+
+    if (source.length <= 42 && looksLikeModelLabel(source)) {
+      return source;
+    }
+
+    return DEFAULT_MODEL_LABEL;
+  }
+
+  function looksLikeModelLabel(text) {
+    return /(ChatGPT\s+(?:Pro|Plus|Team|Enterprise|Free|Go)|GPT[-\s]?(?:5|4o|4\.1|4|3\.5)|\bo[134]\b|Deep\s+Research|Research\s+preview)/i
+      .test(cleanText(text));
+  }
+
+  function getCurrentConversationKey() {
+    try {
+      const url = new URL(location.href);
+      const match = url.pathname.match(/^\/c\/[^/?#]+/);
+      return match ? match[0] : url.pathname || "/";
+    } catch (error) {
+      return location.pathname || "/";
+    }
+  }
+
+  function createEmptyUsageStats() {
+    const nowIso = new Date().toISOString();
+    return {
+      version: 1,
+      total: 0,
+      models: {},
+      events: [],
+      createdAt: nowIso,
+      lastRecordedAt: null,
+      lastModelLabel: null
+    };
+  }
+
+  function normalizeUsageStats(raw) {
+    const fallback = createEmptyUsageStats();
+    if (!raw || typeof raw !== "object") {
+      return fallback;
+    }
+
+    const stats = Object.assign(fallback, raw);
+    stats.total = Number(stats.total || 0);
+    stats.models = stats.models && typeof stats.models === "object" ? stats.models : {};
+    stats.events = Array.isArray(stats.events) ? stats.events : [];
+
+    Object.keys(stats.models).forEach((label) => {
+      const model = stats.models[label] || {};
+      model.total = Number(model.total || 0);
+      model.dates = model.dates && typeof model.dates === "object" ? model.dates : {};
+      model.lastUsedAt = model.lastUsedAt || null;
+      stats.models[label] = model;
+    });
+
+    return stats;
+  }
+
+  async function readUsageStats() {
+    if (!hasChromeStorage()) {
+      return normalizeUsageStats(state.memoryUsageStats);
+    }
+
+    return new Promise((resolve) => {
+      chrome.storage.local.get([USAGE_STORAGE_KEY], (items) => {
+        resolve(normalizeUsageStats(items && items[USAGE_STORAGE_KEY]));
+      });
+    });
+  }
+
+  async function writeUsageStats(stats) {
+    const normalized = normalizeUsageStats(stats);
+    state.memoryUsageStats = normalized;
+
+    if (!hasChromeStorage()) {
+      return normalized;
+    }
+
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.set({ [USAGE_STORAGE_KEY]: normalized }, () => {
+        const error = chrome.runtime && chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        resolve(normalized);
+      });
+    });
+  }
+
+  function hasChromeStorage() {
+    return Boolean(globalThis.chrome && chrome.storage && chrome.storage.local);
+  }
+
+  function localDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
 
   function refreshConversationCheckboxes() {
@@ -931,6 +1309,8 @@
       isDeleting: state.isDeleting,
       selected: state.selectedConversationKeys.size,
       visible,
+      currentModel: detectCurrentModelLabel(),
+      usageTrackingInstalled: state.usageTrackingInstalled,
       lastEstimate: state.lastEstimate,
       logs: state.logs.slice(0, 10)
     };
@@ -953,6 +1333,10 @@
       deleteSelectedConversations,
       estimateVisibleContext,
       estimateTokens,
+      detectCurrentModelLabel,
+      recordModelUsage,
+      resetModelUsage,
+      readUsageStats,
       getConversationCount: () => getConversationLinks().length,
       getSelectedConversations,
       getStatus

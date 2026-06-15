@@ -6,7 +6,8 @@
   "description": "Batch delete visible ChatGPT conversations and estimate visible conversation context usage locally.",
   "minimum_chrome_version": "114",
   "permissions": [
-    "activeTab"
+    "activeTab",
+    "storage"
   ],
   "host_permissions": [
     "https://chatgpt.com/*"

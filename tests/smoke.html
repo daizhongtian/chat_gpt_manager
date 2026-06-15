@@ -18,7 +18,7 @@
       top: 0;
       z-index: 5;
       display: grid;
-      grid-template-columns: repeat(5, auto) 1fr;
+      grid-template-columns: repeat(8, auto) 1fr;
       align-items: center;
       gap: 8px;
       border-bottom: 1px solid #dcdfe4;
@@ -100,6 +100,25 @@
       padding: 40px;
     }
 
+    .mock-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .mock-model-button {
+      min-height: 34px;
+      border: 1px solid #d6d6d6;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #171717;
+      cursor: pointer;
+      font: inherit;
+      padding: 0 12px;
+    }
+
     article {
       margin-bottom: 18px;
       border-radius: 8px;
@@ -136,6 +155,39 @@
       padding: 18px;
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
     }
+
+    .mock-composer {
+      position: sticky;
+      bottom: 16px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      margin-top: 28px;
+      border: 1px solid #dddddd;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    .mock-composer textarea {
+      min-height: 38px;
+      border: 1px solid #d6d6d6;
+      border-radius: 6px;
+      font: inherit;
+      padding: 8px;
+      resize: vertical;
+    }
+
+    .mock-composer button {
+      min-width: 72px;
+      border: 1px solid #10a37f;
+      border-radius: 6px;
+      background: #10a37f;
+      color: #ffffff;
+      cursor: pointer;
+      font: inherit;
+    }
   </style>
 </head>
 <body>
@@ -145,6 +197,9 @@
     <button type="button" id="test-delete">Delete selected</button>
     <button type="button" id="test-refresh">Refresh list</button>
     <button type="button" id="test-estimate">Estimate Context</button>
+    <button type="button" id="test-record-usage">Record Usage</button>
+    <button type="button" id="test-reset-usage">Reset Usage</button>
+    <button type="button" id="test-read-usage">Read Usage</button>
     <label>
       <span class="sr-only">Context window</span>
       <select id="test-window">
@@ -174,9 +229,17 @@
     </aside>
 
     <main>
+      <div class="mock-header">
+        <strong>Mock conversation</strong>
+        <button type="button" class="mock-model-button" data-testid="model-switcher" aria-label="Current model ChatGPT Pro">ChatGPT Pro</button>
+      </div>
       <article data-message-author-role="user">Please summarize this product idea and keep the tone practical.</article>
       <article data-message-author-role="assistant">Here is a concise summary with risks, next steps, and a launch checklist. See https://example.com/a/long/path?with=query for details.</article>
       <article data-message-author-role="user">这是一个混合中文和 English 的消息，用来测试 token 估算。const total = items.length + 42;</article>
+      <form class="mock-composer" aria-label="Message composer">
+        <textarea aria-label="Message" placeholder="Message ChatGPT">Count this ChatGPT Pro message</textarea>
+        <button type="submit" data-testid="send-button" aria-label="Send prompt">Send</button>
+      </form>
     </main>
   </div>
 
@@ -206,6 +269,16 @@
         document.body.appendChild(dialog);
       });
       document.body.appendChild(menu);
+    });
+
+    document.querySelector(".mock-composer").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const textarea = event.currentTarget.querySelector("textarea");
+      const article = document.createElement("article");
+      article.setAttribute("data-message-author-role", "user");
+      article.textContent = textarea.value || "Empty mock message";
+      event.currentTarget.before(article);
+      textarea.value = "";
     });
   </script>
   <script>
@@ -262,6 +335,24 @@
       const api = await getApi();
       const estimate = api.estimateVisibleContext(Number(document.getElementById("test-window").value));
       showStatus(`${estimate.tokens} tokens, ${estimate.messages} messages, ${estimate.percentage.toFixed(2)}%`);
+    });
+
+    document.getElementById("test-record-usage").addEventListener("click", async () => {
+      const api = await getApi();
+      const stats = await api.recordModelUsage("smoke-manual");
+      showStatus(`${stats.lastModelLabel}: ${stats.models[stats.lastModelLabel].total} / total ${stats.total}`);
+    });
+
+    document.getElementById("test-reset-usage").addEventListener("click", async () => {
+      const api = await getApi();
+      const stats = await api.resetModelUsage();
+      showStatus(`Usage reset: ${stats.total}`);
+    });
+
+    document.getElementById("test-read-usage").addEventListener("click", async () => {
+      const api = await getApi();
+      const stats = await api.readUsageStats();
+      showStatus(`Usage total: ${stats.total}`);
     });
   </script>
 </body>

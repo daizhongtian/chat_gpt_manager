@@ -40,7 +40,21 @@
       <div id="estimate-output" class="estimate-output" aria-live="polite"></div>
     </section>
 
-    <p class="footnote">No data leaves this browser. Estimates read only visible page text.</p>
+    <section class="section" aria-label="Usage counter">
+      <div class="section-heading">
+        <h2>Usage Counter</h2>
+        <span id="current-model" class="pill">Model unknown</span>
+      </div>
+      <div class="button-grid">
+        <button type="button" id="record-usage">Record current model</button>
+        <button type="button" id="refresh-usage">Refresh usage</button>
+        <button type="button" id="reset-usage" class="danger">Reset usage</button>
+      </div>
+      <div id="usage-output" class="usage-output" aria-live="polite"></div>
+      <p class="warning">Counts start after the extension is installed and rely on visible ChatGPT UI labels.</p>
+    </section>
+
+    <p class="footnote">No data leaves this browser. Estimates and usage counts stay local.</p>
   </main>
 
   <script src="popup.js"></script>

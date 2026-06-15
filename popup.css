@@ -39,6 +39,30 @@ body {
   padding-top: 12px;
 }
 
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.pill {
+  max-width: 150px;
+  overflow: hidden;
+  border: 1px solid #d6d6d6;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #3f4648;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .button-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -89,7 +113,8 @@ button:disabled {
   gap: 10px;
 }
 
-.estimate-output {
+.estimate-output,
+.usage-output {
   display: grid;
   gap: 7px;
 }
@@ -122,6 +147,24 @@ button:disabled {
   font-size: 12px;
 }
 
+.usage-list {
+  display: grid;
+  gap: 6px;
+}
+
+.usage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.usage-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     background: #202020;
@@ -137,6 +180,11 @@ button:disabled {
   .footnote,
   .warning {
     color: #b9b9b9;
+  }
+
+  .pill {
+    border-color: #454545;
+    color: #d0d0d0;
   }
 
   button,
