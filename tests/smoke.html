@@ -13,16 +13,55 @@
       color: #171717;
     }
 
+    .testbar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: repeat(5, auto) 1fr;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #dcdfe4;
+      background: #ffffff;
+      padding: 10px 12px;
+    }
+
+    .testbar button,
+    .testbar select {
+      min-height: 32px;
+      border: 1px solid #d6d6d6;
+      border-radius: 6px;
+      background: #f7f7f7;
+      color: #171717;
+      font: inherit;
+      padding: 0 10px;
+    }
+
+    .testbar button {
+      cursor: pointer;
+    }
+
+    .test-status {
+      justify-self: end;
+      color: #5f6368;
+      font-size: 12px;
+    }
+
     .layout {
       display: grid;
       grid-template-columns: 300px 1fr;
-      min-height: 100vh;
+      min-height: calc(100vh - 54px);
     }
 
     aside {
-      border-right: 1px solid #ddd;
-      background: #fff;
+      border-right: 1px solid #dddddd;
+      background: #ffffff;
       padding: 12px;
+    }
+
+    aside h1 {
+      margin: 0 0 14px;
+      font-size: 18px;
     }
 
     .conversation-row {
@@ -39,7 +78,7 @@
       min-height: 34px;
       padding: 0 8px;
       border-radius: 6px;
-      color: #222;
+      color: #222222;
       text-decoration: none;
     }
 
@@ -50,9 +89,9 @@
     .menu-button {
       min-width: 32px;
       min-height: 32px;
-      border: 1px solid #ddd;
+      border: 1px solid #dddddd;
       border-radius: 6px;
-      background: #fff;
+      background: #ffffff;
       cursor: pointer;
     }
 
@@ -64,7 +103,7 @@
     article {
       margin-bottom: 18px;
       border-radius: 8px;
-      background: #fff;
+      background: #ffffff;
       padding: 16px;
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
     }
@@ -72,18 +111,18 @@
     [role="menu"] {
       position: fixed;
       left: 260px;
-      top: 80px;
+      top: 110px;
       z-index: 10;
       display: grid;
       gap: 4px;
-      border: 1px solid #ddd;
+      border: 1px solid #dddddd;
       border-radius: 8px;
-      background: #fff;
+      background: #ffffff;
       padding: 6px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
     }
 
-    [role="dialog"] {
+    .mock-delete-dialog {
       position: fixed;
       left: 50%;
       top: 50%;
@@ -91,15 +130,32 @@
       transform: translate(-50%, -50%);
       display: grid;
       gap: 10px;
-      border: 1px solid #ddd;
+      border: 1px solid #dddddd;
       border-radius: 8px;
-      background: #fff;
+      background: #ffffff;
       padding: 18px;
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
     }
   </style>
 </head>
 <body>
+  <div class="testbar" aria-label="Smoke test controls">
+    <button type="button" id="test-select">Select conversations</button>
+    <button type="button" id="test-clear">Deselect all</button>
+    <button type="button" id="test-delete">Delete selected</button>
+    <button type="button" id="test-refresh">Refresh list</button>
+    <button type="button" id="test-estimate">Estimate Context</button>
+    <label>
+      <span class="sr-only">Context window</span>
+      <select id="test-window">
+        <option value="8000">8K</option>
+        <option value="128000" selected>128K</option>
+        <option value="200000">200K</option>
+      </select>
+    </label>
+    <span id="test-status" class="test-status">Ready</span>
+  </div>
+
   <div class="layout">
     <aside aria-label="Chat history sidebar">
       <h1>Mock ChatGPT</h1>
@@ -119,36 +175,94 @@
 
     <main>
       <article data-message-author-role="user">Please summarize this product idea and keep the tone practical.</article>
-      <article data-message-author-role="assistant">Here is a concise summary with risks, next steps, and a launch checklist.</article>
-      <article data-message-author-role="user">这是一个混合中文和 English 的消息，用来测试 token 估算。</article>
+      <article data-message-author-role="assistant">Here is a concise summary with risks, next steps, and a launch checklist. See https://example.com/a/long/path?with=query for details.</article>
+      <article data-message-author-role="user">这是一个混合中文和 English 的消息，用来测试 token 估算。const total = items.length + 42;</article>
     </main>
   </div>
 
   <script>
     document.addEventListener("click", (event) => {
       const menuButton = event.target.closest(".menu-button");
-      if (menuButton) {
-        document.querySelectorAll("[role='menu']").forEach((menu) => menu.remove());
-        const row = menuButton.closest(".conversation-row");
-        const menu = document.createElement("div");
-        menu.setAttribute("role", "menu");
-        menu.innerHTML = '<button type="button" role="menuitem" data-delete-menu>Delete</button>';
-        menu.querySelector("[data-delete-menu]").addEventListener("click", () => {
-          menu.remove();
-          const dialog = document.createElement("div");
-          dialog.setAttribute("role", "dialog");
-          dialog.setAttribute("aria-modal", "true");
-          dialog.innerHTML = '<strong>Delete chat?</strong><button type="button" data-confirm-delete>Delete</button>';
-          dialog.querySelector("[data-confirm-delete]").addEventListener("click", () => {
-            row.remove();
-            dialog.remove();
-          });
-          document.body.appendChild(dialog);
-        });
-        document.body.appendChild(menu);
+      if (!menuButton) {
+        return;
       }
+
+      document.querySelectorAll("[role='menu']").forEach((menu) => menu.remove());
+      const row = menuButton.closest(".conversation-row");
+      const menu = document.createElement("div");
+      menu.setAttribute("role", "menu");
+      menu.innerHTML = '<button type="button" role="menuitem" data-delete-menu>Delete</button>';
+      menu.querySelector("[data-delete-menu]").addEventListener("click", () => {
+        menu.remove();
+        const dialog = document.createElement("div");
+        dialog.className = "mock-delete-dialog";
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        dialog.innerHTML = '<strong>Delete chat?</strong><button type="button" data-confirm-delete>Delete</button>';
+        dialog.querySelector("[data-confirm-delete]").addEventListener("click", () => {
+          row.remove();
+          dialog.remove();
+        });
+        document.body.appendChild(dialog);
+      });
+      document.body.appendChild(menu);
     });
   </script>
-  <script src="../content.js"></script>
+  <script>
+    const status = document.getElementById("test-status");
+    let apiPromise = null;
+
+    async function getApi() {
+      if (window.ChatGPTCleanerContextMeter) {
+        return window.ChatGPTCleanerContextMeter;
+      }
+
+      if (!apiPromise) {
+        apiPromise = fetch(`../content.js?smoke=${Date.now()}`)
+          .then((response) => response.text())
+          .then((source) => {
+            (0, eval)(source);
+            return window.ChatGPTCleanerContextMeter;
+          });
+      }
+
+      return apiPromise;
+    }
+
+    function showStatus(message) {
+      status.textContent = message;
+    }
+
+    document.getElementById("test-select").addEventListener("click", async () => {
+      const api = await getApi();
+      api.activateConversationTools();
+      api.showConversationSelectionDialog();
+      showStatus("Selection dialog opened");
+    });
+
+    document.getElementById("test-clear").addEventListener("click", async () => {
+      const api = await getApi();
+      api.deselectAllConversations();
+      showStatus("Selection cleared");
+    });
+
+    document.getElementById("test-delete").addEventListener("click", async () => {
+      const api = await getApi();
+      api.deleteSelectedConversations();
+      showStatus("Confirm deletion on page");
+    });
+
+    document.getElementById("test-refresh").addEventListener("click", async () => {
+      const api = await getApi();
+      const added = api.refreshConversationCheckboxes();
+      showStatus(`Refreshed, added ${added} checkboxes`);
+    });
+
+    document.getElementById("test-estimate").addEventListener("click", async () => {
+      const api = await getApi();
+      const estimate = api.estimateVisibleContext(Number(document.getElementById("test-window").value));
+      showStatus(`${estimate.tokens} tokens, ${estimate.messages} messages, ${estimate.percentage.toFixed(2)}%`);
+    });
+  </script>
 </body>
 </html>

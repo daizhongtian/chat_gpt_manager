@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChatGPT Cleaner & Context Meter</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="popup">
+    <header class="popup-header">
+      <h1>ChatGPT Cleaner</h1>
+      <p>Batch delete and estimate visible context locally.</p>
+    </header>
+
+    <section class="section" aria-label="Conversation controls">
+      <div class="button-grid">
+        <button type="button" id="select-conversations">Select conversations</button>
+        <button type="button" id="deselect-all">Deselect all</button>
+        <button type="button" id="delete-selected" class="danger">Delete selected</button>
+        <button type="button" id="refresh-list">Refresh list</button>
+      </div>
+      <p class="status" id="conversation-status">Open a ChatGPT tab, then use the controls.</p>
+    </section>
+
+    <section class="section" aria-label="Context estimate">
+      <label class="field">
+        <span>Context window</span>
+        <select id="context-window">
+          <option value="8000">8K</option>
+          <option value="16000">16K</option>
+          <option value="32000">32K</option>
+          <option value="64000">64K</option>
+          <option value="128000" selected>128K</option>
+          <option value="200000">200K</option>
+          <option value="1000000">1M</option>
+        </select>
+      </label>
+      <button type="button" id="estimate-context" class="wide">Estimate Context</button>
+      <div id="estimate-output" class="estimate-output" aria-live="polite"></div>
+    </section>
+
+    <p class="footnote">No data leaves this browser. Estimates read only visible page text.</p>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>

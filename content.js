@@ -1,123 +1,126 @@
 (function () {
   "use strict";
 
-  const APP_ID = "ccm-panel";
-  const MODAL_ID = "ccm-confirm-modal";
+  const CONFIRM_MODAL_ID = "ccm-confirm-modal";
+  const SELECT_MODAL_ID = "ccm-select-modal";
+  const TOAST_ID = "ccm-toast";
   const CHECKBOX_CLASS = "ccm-conversation-checkbox";
   const ENHANCED_ATTR = "data-ccm-enhanced";
-  const CONTEXT_WINDOWS = [
-    { label: "8K", value: 8000 },
-    { label: "16K", value: 16000 },
-    { label: "32K", value: 32000 },
-    { label: "64K", value: 64000 },
-    { label: "128K", value: 128000 },
-    { label: "200K", value: 200000 },
-    { label: "1M", value: 1000000 }
-  ];
+  const DELETE_DELAY_MS = 1400;
 
   const state = {
     observer: null,
     refreshTimer: null,
+    isActivated: false,
     isDeleting: false,
-    lastEstimate: null
+    lastEstimate: null,
+    logs: [],
+    selectedConversationKeys: new Set()
   };
 
   function init() {
-    if (!document.body) {
+    installMessageBridge();
+    exposeTestApi();
+  }
+
+  function installMessageBridge() {
+    if (!globalThis.chrome || !chrome.runtime || !chrome.runtime.onMessage) {
       return;
     }
 
-    injectPanel();
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (!message || message.source !== "ccm-popup") {
+        return false;
+      }
+
+      Promise.resolve(handlePopupMessage(message))
+        .then((response) => sendResponse(response))
+        .catch((error) => sendResponse({
+          ok: false,
+          error: error && error.message ? error.message : String(error)
+        }));
+
+      return true;
+    });
+  }
+
+  async function handlePopupMessage(message) {
+    switch (message.type) {
+      case "CCM_GET_STATUS":
+        if (state.isActivated) {
+          refreshConversationCheckboxes();
+        }
+        return ok({ status: getStatus() });
+
+      case "CCM_SELECT_CONVERSATIONS":
+        activateConversationTools();
+        showConversationSelectionDialog();
+        return ok({
+          message: "Selection dialog opened on the ChatGPT page.",
+          status: getStatus()
+        });
+
+      case "CCM_DESELECT_ALL":
+        activateConversationTools();
+        deselectAllConversations();
+        showToast("All selected conversations were cleared.");
+        return ok({
+          message: "Selection cleared.",
+          status: getStatus()
+        });
+
+      case "CCM_DELETE_SELECTED":
+        activateConversationTools();
+        // Let the page-side confirmation and progress continue even if the
+        // extension popup closes while the user types DELETE.
+        deleteSelectedConversations();
+        return ok({
+          message: "Confirm deletion on the ChatGPT page.",
+          status: getStatus()
+        });
+
+      case "CCM_REFRESH_LIST":
+        activateConversationTools();
+        refreshConversationCheckboxes();
+        showToast("Conversation list refreshed.");
+        return ok({
+          message: "Conversation list refreshed.",
+          status: getStatus()
+        });
+
+      case "CCM_ESTIMATE_CONTEXT":
+        return ok({
+          estimate: estimateVisibleContext(Number(message.contextWindow)),
+          status: getStatus()
+        });
+
+      default:
+        throw new Error("Unknown extension action.");
+    }
+  }
+
+  function ok(payload) {
+    return Object.assign({ ok: true }, payload);
+  }
+
+  function activateConversationTools() {
+    state.isActivated = true;
     refreshConversationCheckboxes();
     installMutationObserver();
   }
 
-  function injectPanel() {
-    if (document.getElementById(APP_ID)) {
+  function installMutationObserver() {
+    if (state.observer || !document.body) {
       return;
     }
 
-    const panel = document.createElement("section");
-    panel.id = APP_ID;
-    panel.setAttribute("aria-label", "ChatGPT Cleaner and Context Meter");
-    panel.innerHTML = `
-      <div class="ccm-header">
-        <div>
-          <div class="ccm-title">ChatGPT Cleaner</div>
-          <div class="ccm-subtitle">Batch delete + context estimate</div>
-        </div>
-        <button type="button" class="ccm-icon-button" id="ccm-minimize" title="Collapse panel" aria-label="Collapse panel">−</button>
-      </div>
-
-      <div class="ccm-body">
-        <div class="ccm-button-grid" aria-label="Conversation selection controls">
-          <button type="button" id="ccm-select-visible">Select visible</button>
-          <button type="button" id="ccm-deselect-all">Deselect all</button>
-          <button type="button" id="ccm-delete-selected" class="ccm-danger">Delete selected</button>
-          <button type="button" id="ccm-refresh-list">Refresh list</button>
-        </div>
-
-        <div class="ccm-meter-row">
-          <label for="ccm-context-window">Context window</label>
-          <select id="ccm-context-window">
-            ${CONTEXT_WINDOWS.map((item) => `<option value="${item.value}" ${item.value === 128000 ? "selected" : ""}>${item.label}</option>`).join("")}
-          </select>
-        </div>
-
-        <button type="button" id="ccm-estimate-context" class="ccm-wide-button">Estimate Context</button>
-
-        <div id="ccm-selection-status" class="ccm-status">Scanning visible conversations...</div>
-        <div id="ccm-estimate-output" class="ccm-output" aria-live="polite"></div>
-        <div id="ccm-progress" class="ccm-progress" aria-live="polite"></div>
-        <details class="ccm-log-wrap">
-          <summary>Log</summary>
-          <ol id="ccm-log" class="ccm-log"></ol>
-        </details>
-      </div>
-    `;
-
-    document.body.appendChild(panel);
-
-    byId("ccm-select-visible").addEventListener("click", selectVisibleConversations);
-    byId("ccm-deselect-all").addEventListener("click", deselectAllConversations);
-    byId("ccm-delete-selected").addEventListener("click", deleteSelectedConversations);
-    byId("ccm-refresh-list").addEventListener("click", () => {
-      refreshConversationCheckboxes();
-      logMessage("Conversation list refreshed.");
-    });
-    byId("ccm-estimate-context").addEventListener("click", () => {
-      const estimate = estimateVisibleContext();
-      renderContextEstimate(estimate);
-    });
-    byId("ccm-context-window").addEventListener("change", () => {
-      if (state.lastEstimate) {
-        renderContextEstimate(state.lastEstimate);
-      }
-    });
-    byId("ccm-minimize").addEventListener("click", togglePanel);
-  }
-
-  function byId(id) {
-    return document.getElementById(id);
-  }
-
-  function togglePanel() {
-    const panel = byId(APP_ID);
-    const button = byId("ccm-minimize");
-    const collapsed = panel.classList.toggle("ccm-collapsed");
-    button.textContent = collapsed ? "+" : "−";
-    button.title = collapsed ? "Expand panel" : "Collapse panel";
-    button.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
-  }
-
-  function installMutationObserver() {
-    if (state.observer) {
-      state.observer.disconnect();
-    }
-
-    // ChatGPT is a single-page app. The sidebar is rebuilt often, so observe DOM
-    // changes and re-add checkboxes after the page settles for a moment.
+    // ChatGPT is a single-page app. The sidebar is rebuilt often, so observe
+    // DOM changes only after the user activates the extension.
     state.observer = new MutationObserver(() => {
+      if (!state.isActivated) {
+        return;
+      }
+
       window.clearTimeout(state.refreshTimer);
       state.refreshTimer = window.setTimeout(refreshConversationCheckboxes, 350);
     });
@@ -133,24 +136,30 @@
     let added = 0;
 
     links.forEach((link) => {
-      if (link.getAttribute(ENHANCED_ATTR) === "true") {
-        const existing = link.querySelector(`.${CHECKBOX_CLASS}`);
-        if (existing) {
-          existing.setAttribute("aria-label", `Select conversation: ${getConversationTitle(link)}`);
-        }
+      const key = getConversationKey(link);
+      const existing = link.querySelector(`.${CHECKBOX_CLASS}`);
+
+      if (existing) {
+        existing.dataset.ccmKey = key;
+        existing.checked = state.selectedConversationKeys.has(key);
+        existing.setAttribute("aria-label", `Select conversation: ${getConversationTitle(link)}`);
         return;
       }
 
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.className = CHECKBOX_CLASS;
-      checkbox.dataset.ccmKey = getConversationKey(link);
+      checkbox.dataset.ccmKey = key;
+      checkbox.checked = state.selectedConversationKeys.has(key);
       checkbox.setAttribute("aria-label", `Select conversation: ${getConversationTitle(link)}`);
       checkbox.title = "Select this conversation";
 
       // Prevent checkbox clicks from opening the conversation link underneath it.
       ["click", "mousedown", "mouseup", "keydown"].forEach((eventName) => {
         checkbox.addEventListener(eventName, (event) => event.stopPropagation());
+      });
+      checkbox.addEventListener("change", () => {
+        setConversationSelected(key, checkbox.checked);
       });
 
       link.insertBefore(checkbox, link.firstChild);
@@ -159,7 +168,6 @@
       added += 1;
     });
 
-    updateSelectionStatus();
     return added;
   }
 
@@ -180,15 +188,16 @@
   }
 
   function findSidebarRoot() {
-    const candidates = Array.from(document.querySelectorAll([
+    const selectors = [
       "aside",
       "nav",
       '[role="navigation"]',
       '[data-testid*="sidebar" i]',
       '[aria-label*="sidebar" i]',
       '[aria-label*="history" i]'
-    ].join(",")));
+    ].join(",");
 
+    const candidates = Array.from(document.querySelectorAll(selectors));
     let best = null;
     let bestScore = 0;
 
@@ -273,25 +282,136 @@
   }
 
   function isInsideExtensionUi(element) {
-    return Boolean(element.closest(`#${APP_ID}, #${MODAL_ID}`));
+    return Boolean(element.closest(`#${CONFIRM_MODAL_ID}, #${SELECT_MODAL_ID}, #${TOAST_ID}`));
   }
 
-  function selectVisibleConversations() {
-    refreshConversationCheckboxes();
+  function setConversationSelected(key, isSelected) {
+    if (isSelected) {
+      state.selectedConversationKeys.add(key);
+    } else {
+      state.selectedConversationKeys.delete(key);
+    }
+  }
+
+  function syncSidebarSelection() {
     getConversationLinks().forEach((link) => {
       const checkbox = link.querySelector(`.${CHECKBOX_CLASS}`);
-      if (checkbox && isVisibleElement(link)) {
-        checkbox.checked = true;
+      if (checkbox) {
+        checkbox.checked = state.selectedConversationKeys.has(getConversationKey(link));
       }
     });
-    updateSelectionStatus();
   }
 
   function deselectAllConversations() {
+    state.selectedConversationKeys.clear();
     document.querySelectorAll(`.${CHECKBOX_CLASS}`).forEach((checkbox) => {
       checkbox.checked = false;
     });
-    updateSelectionStatus();
+  }
+
+  function showConversationSelectionDialog() {
+    const conversations = getConversationLinks().map((link) => ({
+      key: getConversationKey(link),
+      title: getConversationTitle(link),
+      selected: state.selectedConversationKeys.has(getConversationKey(link))
+    }));
+
+    if (!conversations.length) {
+      logMessage("No visible conversations found.");
+      showToast("No visible conversations found.");
+      return;
+    }
+
+    const oldModal = byId(SELECT_MODAL_ID);
+    if (oldModal) {
+      oldModal.remove();
+    }
+
+    const modal = document.createElement("div");
+    modal.id = SELECT_MODAL_ID;
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-label", "Select conversations");
+    modal.innerHTML = `
+      <div class="ccm-modal-card">
+        <h2>Select conversations</h2>
+        <p>Choose the visible conversations to mark for deletion. Nothing is selected automatically.</p>
+        <div class="ccm-selection-count" id="ccm-selection-count"></div>
+        <div class="ccm-selection-list" id="ccm-selection-list" tabindex="0"></div>
+        <div class="ccm-modal-actions ccm-modal-actions-spread">
+          <button type="button" id="ccm-selection-clear">Clear</button>
+          <button type="button" id="ccm-selection-all">Select all visible</button>
+          <span class="ccm-modal-spacer"></span>
+          <button type="button" id="ccm-selection-cancel">Cancel</button>
+          <button type="button" id="ccm-selection-apply">Apply selection</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const list = byId("ccm-selection-list");
+    conversations.forEach((conversation, index) => {
+      const label = document.createElement("label");
+      label.className = "ccm-selection-item";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.index = String(index);
+      checkbox.checked = conversation.selected;
+
+      const title = document.createElement("span");
+      title.textContent = conversation.title;
+
+      label.append(checkbox, title);
+      list.appendChild(label);
+    });
+
+    const updateDialogCount = () => {
+      const selectedCount = list.querySelectorAll("input[type='checkbox']:checked").length;
+      byId("ccm-selection-count").textContent =
+        `${selectedCount} selected / ${conversations.length} visible conversations`;
+    };
+
+    list.addEventListener("change", updateDialogCount);
+    updateDialogCount();
+
+    byId("ccm-selection-clear").addEventListener("click", () => {
+      list.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+        checkbox.checked = false;
+      });
+      updateDialogCount();
+    });
+
+    byId("ccm-selection-all").addEventListener("click", () => {
+      list.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+      updateDialogCount();
+    });
+
+    byId("ccm-selection-cancel").addEventListener("click", () => {
+      modal.remove();
+    });
+
+    byId("ccm-selection-apply").addEventListener("click", () => {
+      state.selectedConversationKeys.clear();
+      list.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+        if (!checkbox.checked) {
+          return;
+        }
+
+        const conversation = conversations[Number(checkbox.dataset.index)];
+        if (conversation) {
+          state.selectedConversationKeys.add(conversation.key);
+        }
+      });
+
+      modal.remove();
+      syncSidebarSelection();
+      logMessage(`Applied selection: ${state.selectedConversationKeys.size} conversations.`);
+      showToast(`${state.selectedConversationKeys.size} conversations selected.`);
+    });
   }
 
   function getSelectedConversations() {
@@ -305,45 +425,32 @@
       }))
       .filter((conversation) => {
         const checkbox = conversation.link.querySelector(`.${CHECKBOX_CLASS}`);
-        return checkbox && checkbox.checked;
+        return state.selectedConversationKeys.has(conversation.key) || Boolean(checkbox && checkbox.checked);
       });
-  }
-
-  function updateSelectionStatus() {
-    const status = byId("ccm-selection-status");
-    if (!status) {
-      return;
-    }
-
-    const links = getConversationLinks();
-    const selected = links.filter((link) => {
-      const checkbox = link.querySelector(`.${CHECKBOX_CLASS}`);
-      return checkbox && checkbox.checked;
-    });
-
-    status.textContent = `${selected.length} selected / ${links.length} visible conversations`;
   }
 
   async function deleteSelectedConversations() {
     if (state.isDeleting) {
       logMessage("Deletion is already running.");
+      showToast("Deletion is already running.");
       return;
     }
 
     const conversations = getSelectedConversations();
     if (!conversations.length) {
       logMessage("No conversations selected.");
+      showToast("No conversations selected.");
       return;
     }
 
     const confirmed = await showDeleteConfirmation(conversations);
     if (!confirmed) {
       logMessage("Deletion cancelled.");
+      showToast("Deletion cancelled.");
       return;
     }
 
     state.isDeleting = true;
-    setBusyState(true);
     const failures = [];
     let deleted = 0;
 
@@ -355,18 +462,18 @@
         try {
           await deleteConversation(conversation);
           deleted += 1;
+          state.selectedConversationKeys.delete(conversation.key);
           logMessage(`Deleted: ${conversation.title}`);
         } catch (error) {
           failures.push({ conversation, error });
-          logMessage(`Failed: ${conversation.title} — ${error.message}`);
+          logMessage(`Failed: ${conversation.title} - ${error.message}`);
         }
 
         setProgress(`Deleted ${deleted} / ${conversations.length}. Failures: ${failures.length}.`);
-        await sleep(1400);
+        await sleep(DELETE_DELAY_MS);
       }
     } finally {
       state.isDeleting = false;
-      setBusyState(false);
       refreshConversationCheckboxes();
       setProgress(`Finished. Deleted ${deleted} / ${conversations.length}. Failures: ${failures.length}.`);
     }
@@ -388,11 +495,14 @@
       throw new Error("Could not find the conversation menu button.");
     }
 
+    logMessage(`Opening menu: ${conversation.title}`);
     clickElement(menuButton);
     const deleteItem = await waitFor(() => findDeleteMenuItem(), 5000, 100);
+    logMessage(`Clicking delete menu item: ${conversation.title}`);
     clickElement(deleteItem);
 
     const confirmButton = await waitFor(() => findConfirmDeleteButton(), 7000, 100);
+    logMessage(`Confirming deletion: ${conversation.title}`);
     clickElement(confirmButton);
 
     await waitFor(() => {
@@ -439,7 +549,7 @@
     const rowButtons = Array.from(row.querySelectorAll ? row.querySelectorAll("button,[role='button']") : []);
     const visibleRowButtons = rowButtons.filter((button) => !isInsideExtensionUi(button) && isVisibleElement(button));
 
-    const labelPattern = /(conversation|chat|options|menu|more|更多|菜单|選單|選項|选项)/i;
+    const labelPattern = /(conversation|chat|options|menu|more|\u66f4\u591a|\u83dc\u5355|\u9009\u9879)/i;
     const ariaButton = visibleRowButtons.find((button) => labelPattern.test(getAccessibleText(button)));
     if (ariaButton) {
       return ariaButton;
@@ -447,7 +557,7 @@
 
     const iconLikeButton = visibleRowButtons.find((button) => {
       const text = cleanText(button.textContent);
-      return text === "" || text === "..." || text === "⋯" || text === "…";
+      return text === "" || text === "..." || text === "\u22ef" || text === "\u2026";
     });
     if (iconLikeButton) {
       return iconLikeButton;
@@ -470,6 +580,12 @@
   }
 
   function findDeleteMenuItem() {
+    const menuRootSelectors = [
+      '[role="menu"]',
+      '[data-radix-menu-content]',
+      '[data-radix-popper-content-wrapper]',
+      '[data-side][data-align]'
+    ].join(",");
     const selectors = [
       '[role="menuitem"]',
       '[data-radix-collection-item]',
@@ -477,15 +593,26 @@
       '[role="button"]'
     ].join(",");
 
-    const deletePattern = /^(delete|delete chat|delete conversation|删除|刪除|移除)$/i;
-    const containsDeletePattern = /(delete|删除|刪除)/i;
+    const deletePattern = /^(delete|delete chat|delete conversation|remove|\u5220\u9664|\u79fb\u9664)$/i;
+    const containsDeletePattern = /(delete|\u5220\u9664|\u79fb\u9664)/i;
+    const roots = Array.from(document.querySelectorAll(menuRootSelectors))
+      .filter((element) => !isInsideExtensionUi(element) && isVisibleElement(element));
+    const searchRoots = roots.length ? roots.reverse() : [document];
 
-    return Array.from(document.querySelectorAll(selectors))
-      .filter((element) => !isInsideExtensionUi(element) && isVisibleElement(element))
-      .find((element) => {
-        const text = getAccessibleText(element);
-        return deletePattern.test(text) || containsDeletePattern.test(text);
-      }) || null;
+    for (const root of searchRoots) {
+      const match = Array.from(root.querySelectorAll(selectors))
+        .filter((element) => !isInsideExtensionUi(element) && isVisibleElement(element))
+        .find((element) => {
+          const text = getAccessibleText(element);
+          return deletePattern.test(text) || containsDeletePattern.test(text);
+        });
+
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
   }
 
   function findConfirmDeleteButton() {
@@ -497,13 +624,33 @@
     const buttons = Array.from(root.querySelectorAll("button,[role='button']"))
       .filter((button) => !isInsideExtensionUi(button) && isVisibleElement(button));
 
-    const confirmPattern = /^(delete|delete chat|delete conversation|confirm|yes, delete|删除|刪除|确认|確認)$/i;
-    const cancelPattern = /(cancel|keep|取消|保留)/i;
+    const directConfirm = buttons.find((button) => button.matches([
+      "[data-confirm-delete]",
+      '[data-testid*="delete" i]',
+      '[aria-label*="delete" i]',
+      '[aria-label*="confirm" i]'
+    ].join(",")));
+    if (directConfirm) {
+      return directConfirm;
+    }
 
-    return buttons.find((button) => {
+    const confirmPattern = /^(delete|delete chat|delete conversation|confirm|yes, delete|\u5220\u9664|\u786e\u8ba4|\u662f)$/i;
+    const cancelPattern = /(cancel|keep|\u53d6\u6d88|\u4fdd\u7559)/i;
+
+    const textMatch = buttons.find((button) => {
       const text = getAccessibleText(button);
       return confirmPattern.test(text) && !cancelPattern.test(text);
-    }) || null;
+    });
+    if (textMatch) {
+      return textMatch;
+    }
+
+    const nonCancelButtons = buttons.filter((button) => !cancelPattern.test(getAccessibleText(button)));
+    if (dialog && nonCancelButtons.length === 1) {
+      return nonCancelButtons[0];
+    }
+
+    return null;
   }
 
   function getAccessibleText(element) {
@@ -549,20 +696,20 @@
 
   function showDeleteConfirmation(conversations) {
     return new Promise((resolve) => {
-      const oldModal = byId(MODAL_ID);
+      const oldModal = byId(CONFIRM_MODAL_ID);
       if (oldModal) {
         oldModal.remove();
       }
 
       const modal = document.createElement("div");
-      modal.id = MODAL_ID;
+      modal.id = CONFIRM_MODAL_ID;
       modal.setAttribute("role", "dialog");
       modal.setAttribute("aria-modal", "true");
       modal.setAttribute("aria-label", "Confirm batch deletion");
       modal.innerHTML = `
         <div class="ccm-modal-card">
           <h2>Delete ${conversations.length} conversations?</h2>
-          <p>This will use ChatGPT's normal delete menu one conversation at a time.</p>
+          <p>This uses ChatGPT's normal delete menu one conversation at a time.</p>
           <div class="ccm-modal-list" tabindex="0">
             <ol>
               ${conversations.map((conversation) => `<li>${escapeHtml(conversation.title)}</li>`).join("")}
@@ -607,72 +754,89 @@
     return span.innerHTML;
   }
 
-  function setBusyState(isBusy) {
-    ["ccm-select-visible", "ccm-deselect-all", "ccm-delete-selected", "ccm-refresh-list"].forEach((id) => {
-      const button = byId(id);
-      if (button) {
-        button.disabled = isBusy;
-      }
-    });
+  function setProgress(message) {
+    showToast(message, { sticky: true });
   }
 
-  function setProgress(message) {
-    const progress = byId("ccm-progress");
-    if (progress) {
-      progress.textContent = message;
+  function showToast(message, options = {}) {
+    let toast = byId(TOAST_ID);
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = TOAST_ID;
+      toast.setAttribute("role", "status");
+      toast.setAttribute("aria-live", "polite");
+      document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+
+    if (!options.sticky) {
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => {
+        const current = byId(TOAST_ID);
+        if (current) {
+          current.remove();
+        }
+      }, 4200);
     }
   }
 
   function logMessage(message) {
-    const log = byId("ccm-log");
-    if (!log) {
-      return;
-    }
-
-    const item = document.createElement("li");
-    item.textContent = `${new Date().toLocaleTimeString()} — ${message}`;
-    log.prepend(item);
-
-    while (log.children.length > 40) {
-      log.lastElementChild.remove();
-    }
+    const entry = `${new Date().toLocaleTimeString()} - ${message}`;
+    state.logs.unshift(entry);
+    state.logs = state.logs.slice(0, 60);
+    console.info("[ChatGPT Cleaner]", message);
   }
 
-  function estimateVisibleContext() {
+  function estimateVisibleContext(contextWindowValue) {
     const messages = getVisibleMessages();
     const text = messages.map((message) => message.text).join("\n\n");
     const estimate = estimateTokens(text);
+    const contextWindow = Number(contextWindowValue || 128000);
+    const percentage = contextWindow > 0 ? (estimate.tokens / contextWindow) * 100 : 0;
 
     state.lastEstimate = {
       tokens: estimate.tokens,
       characters: text.length,
       messages: messages.length,
+      contextWindow,
+      percentage,
+      method: estimate.method,
       cjkCharacters: estimate.cjkCharacters,
-      nonCjkCharacters: estimate.nonCjkCharacters
+      nonCjkCharacters: estimate.nonCjkCharacters,
+      englishWordCount: estimate.englishWordCount,
+      numberCount: estimate.numberCount,
+      urlCount: estimate.urlCount,
+      punctuationCount: estimate.punctuationCount,
+      warning: "Visible page only. This is not the real model backend context."
     };
 
+    logMessage(`Estimated ${formatNumber(estimate.tokens)} visible tokens across ${messages.length} messages.`);
     return state.lastEstimate;
   }
 
   function getVisibleMessages() {
     const main = document.querySelector("main") || document.body;
-    const selectors = [
+    const selectorGroups = [
       "[data-message-author-role]",
       '[data-testid^="conversation-turn"]',
-      "article"
-    ].join(",");
+      "article",
+      ".markdown, [class*='markdown']"
+    ];
 
-    let elements = Array.from(main.querySelectorAll(selectors))
-      .filter((element) => !isInsideExtensionUi(element) && isVisibleElement(element));
-
-    if (!elements.length) {
-      elements = Array.from(main.querySelectorAll(".markdown, [class*='markdown']"))
+    let elements = [];
+    for (const selectors of selectorGroups) {
+      elements = Array.from(main.querySelectorAll(selectors))
         .filter((element) => !isInsideExtensionUi(element) && isVisibleElement(element));
+
+      if (elements.length) {
+        break;
+      }
     }
 
     const seen = new Set();
     return elements
-      .map((element) => cleanText(element.textContent))
+      .map((element) => extractReadableText(element))
       .filter((text) => {
         if (!text || seen.has(text)) {
           return false;
@@ -683,45 +847,116 @@
       .map((text) => ({ text }));
   }
 
+  function extractReadableText(element) {
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll([
+      "button",
+      "[role='button']",
+      "nav",
+      "menu",
+      "input",
+      "textarea",
+      "select",
+      "script",
+      "style",
+      ".sr-only"
+    ].join(",")).forEach((node) => node.remove());
+
+    return cleanText(clone.textContent);
+  }
+
   function estimateTokens(text) {
     const source = String(text || "");
-    const cjkMatches = source.match(/[\u3400-\u9FFF\uF900-\uFAFF]/g) || [];
+    if (!source) {
+      return {
+        tokens: 0,
+        cjkCharacters: 0,
+        nonCjkCharacters: 0,
+        englishWordCount: 0,
+        numberCount: 0,
+        urlCount: 0,
+        punctuationCount: 0,
+        method: "hybrid-local-v2"
+      };
+    }
+
+    const cjkRegex = /[\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]/g;
+    const urlRegex = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+    const cjkMatches = source.match(cjkRegex) || [];
+    const urlMatches = source.match(urlRegex) || [];
     const cjkCharacters = cjkMatches.length;
     const nonCjkCharacters = Math.max(source.length - cjkCharacters, 0);
+
+    // Remove high-density pieces before counting normal words so URLs do not
+    // get counted twice. This stays local and dependency-free.
+    const withoutCjk = source.replace(cjkRegex, " ");
+    const withoutUrls = withoutCjk.replace(urlRegex, " ");
+    const englishWords = withoutUrls.match(/[A-Za-z]+(?:['-][A-Za-z]+)?/g) || [];
+    const numbers = withoutUrls.match(/\b\d+(?:[.,:/-]\d+)*\b/g) || [];
+    const punctuation = source.match(/[^\sA-Za-z0-9\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]/g) || [];
+    const lineBreaks = source.match(/\n+/g) || [];
+
     const cjkTokens = cjkCharacters / 1.5;
-    const nonCjkTokens = nonCjkCharacters / 4;
+    const urlTokens = sum(urlMatches.map((url) => Math.max(1, url.length / 3.2)));
+    const wordTokens = englishWords.length * 1.28;
+    const numberTokens = numbers.length * 1.15;
+    const punctuationTokens = punctuation.length * 0.35;
+    const lineBreakTokens = lineBreaks.length * 0.25;
+    const structuralNonCjkTokens = urlTokens + wordTokens + numberTokens + punctuationTokens + lineBreakTokens;
+    const characterNonCjkTokens = nonCjkCharacters / 4;
+    const nonCjkTokens = structuralNonCjkTokens > 0
+      ? (structuralNonCjkTokens * 0.65) + (characterNonCjkTokens * 0.35)
+      : characterNonCjkTokens;
 
     return {
       tokens: Math.ceil(cjkTokens + nonCjkTokens),
       cjkCharacters,
-      nonCjkCharacters
+      nonCjkCharacters,
+      englishWordCount: englishWords.length,
+      numberCount: numbers.length,
+      urlCount: urlMatches.length,
+      punctuationCount: punctuation.length,
+      method: "hybrid-local-v2"
     };
   }
 
-  function renderContextEstimate(estimate) {
-    const output = byId("ccm-estimate-output");
-    if (!output) {
-      return;
-    }
+  function sum(values) {
+    return values.reduce((total, value) => total + value, 0);
+  }
 
-    const contextWindow = Number(byId("ccm-context-window").value || 128000);
-    const percentage = contextWindow > 0 ? (estimate.tokens / contextWindow) * 100 : 0;
+  function getStatus() {
+    const visible = state.isActivated ? getConversationLinks().length : 0;
+    return {
+      activated: state.isActivated,
+      isDeleting: state.isDeleting,
+      selected: state.selectedConversationKeys.size,
+      visible,
+      lastEstimate: state.lastEstimate,
+      logs: state.logs.slice(0, 10)
+    };
+  }
 
-    output.innerHTML = `
-      <div class="ccm-metric"><span>Visible tokens</span><strong>${formatNumber(estimate.tokens)}</strong></div>
-      <div class="ccm-metric"><span>Characters</span><strong>${formatNumber(estimate.characters)}</strong></div>
-      <div class="ccm-metric"><span>Messages</span><strong>${formatNumber(estimate.messages)}</strong></div>
-      <div class="ccm-meter" aria-label="Approximate visible context usage">
-        <div class="ccm-meter-fill" style="width: ${Math.min(percentage, 100).toFixed(2)}%"></div>
-      </div>
-      <div class="ccm-warning">${percentage.toFixed(2)}% of selected ${formatNumber(contextWindow)} token window. Visible page only; not backend context.</div>
-    `;
-
-    logMessage(`Estimated ${formatNumber(estimate.tokens)} visible tokens across ${estimate.messages} messages.`);
+  function byId(id) {
+    return document.getElementById(id);
   }
 
   function formatNumber(value) {
     return new Intl.NumberFormat().format(value);
+  }
+
+  function exposeTestApi() {
+    globalThis.ChatGPTCleanerContextMeter = {
+      activateConversationTools,
+      refreshConversationCheckboxes,
+      showConversationSelectionDialog,
+      deselectAllConversations,
+      deleteSelectedConversations,
+      estimateVisibleContext,
+      estimateTokens,
+      getConversationCount: () => getConversationLinks().length,
+      getSelectedConversations,
+      getStatus
+    };
   }
 
   if (document.readyState === "loading") {
@@ -729,13 +964,4 @@
   } else {
     init();
   }
-
-  // Exposed for local smoke tests and for users who want to inspect behavior in DevTools.
-  window.ChatGPTCleanerContextMeter = {
-    refreshConversationCheckboxes,
-    estimateVisibleContext,
-    estimateTokens,
-    getConversationCount: () => getConversationLinks().length,
-    getSelectedConversations
-  };
 })();

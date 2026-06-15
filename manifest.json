@@ -5,9 +5,16 @@
   "version": "1.0.0",
   "description": "Batch delete visible ChatGPT conversations and estimate visible conversation context usage locally.",
   "minimum_chrome_version": "114",
+  "permissions": [
+    "activeTab"
+  ],
   "host_permissions": [
     "https://chatgpt.com/*"
   ],
+  "action": {
+    "default_title": "ChatGPT Cleaner & Context Meter",
+    "default_popup": "popup.html"
+  },
   "content_scripts": [
     {
       "matches": [
