@@ -132,18 +132,12 @@
   }
 
   function handleEstimateOutputClick(event) {
-    const button = event.target.closest("[data-action='add-local-pdf']");
     const batchButton = event.target.closest("[data-action='add-local-pdfs']");
-    if (!button && !batchButton) {
+    if (!batchButton) {
       return;
     }
 
-    pendingMissingAttachment = button
-      ? {
-        key: button.getAttribute("data-attachment-key") || "",
-        name: button.getAttribute("data-attachment-name") || ""
-      }
-      : null;
+    pendingMissingAttachment = null;
     elements.localPdfInput.value = "";
     elements.localPdfInput.click();
   }
@@ -450,7 +444,7 @@
   }
 
   function renderMissingAttachments(attachments) {
-    const items = normalizeAttachmentList(attachments);
+    const items = dedupeMissingAttachments(normalizeAttachmentList(attachments));
     if (!items.length) {
       return "";
     }
@@ -469,7 +463,6 @@
                 <span>Status: ${escapeHtml(attachment.status || "Not counted")}</span>
                 <span>Reason: ${escapeHtml(attachment.reason || "File content is not available to the browser.")}</span>
               </div>
-              <button type="button" class="small-button" data-action="add-local-pdf" data-attachment-key="${escapeAttribute(attachment.key || "")}" data-attachment-name="${escapeAttribute(attachment.name || "")}">Add local PDF</button>
             </div>
           `).join("")}
         </div>
@@ -535,6 +528,19 @@
 
   function normalizeAttachmentList(attachments) {
     return Array.isArray(attachments) ? attachments.filter((attachment) => attachment && typeof attachment === "object") : [];
+  }
+
+  function dedupeMissingAttachments(attachments) {
+    const seen = new Set();
+    return attachments.filter((attachment) => {
+      const key = normalizeFileName(attachment.name) || String(attachment.key || "");
+      if (!key || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
   }
 
   function attachmentMatchesLocalPdf(missing, localAttachment) {

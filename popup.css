@@ -193,6 +193,10 @@ button:disabled {
   padding-top: 7px;
 }
 
+.missing-attachment {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .attachment-item:first-child {
   border-top: 0;
   padding-top: 0;

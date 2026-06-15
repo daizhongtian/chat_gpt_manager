@@ -1372,12 +1372,23 @@
       .map((element) => createPdfAttachment(element))
       .filter(Boolean)
       .filter((attachment) => {
-        if (!attachment.key || seen.has(attachment.key)) {
+        const dedupeKey = getPdfAttachmentDedupeKey(attachment);
+        if (!dedupeKey || seen.has(dedupeKey)) {
           return false;
         }
-        seen.add(attachment.key);
+        seen.add(dedupeKey);
         return true;
       });
+  }
+
+  function getPdfAttachmentDedupeKey(attachment) {
+    const fetchUrl = attachment.fetchUrl || "";
+    if (fetchUrl) {
+      return fetchUrl;
+    }
+
+    const name = cleanText(attachment.name).toLowerCase();
+    return name || attachment.key || "";
   }
 
   function collectPdfCandidateElements(root) {
