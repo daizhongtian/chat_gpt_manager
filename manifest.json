@@ -3,10 +3,9 @@
   "name": "ChatGPT Cleaner & Context Meter",
   "short_name": "ChatGPT Cleaner",
   "version": "1.0.0",
-  "description": "Batch delete visible ChatGPT conversations and estimate visible conversation context usage locally.",
+  "description": "Batch delete visible ChatGPT conversations, estimate visible context usage, and count local model usage.",
   "minimum_chrome_version": "114",
   "permissions": [
-    "activeTab",
     "storage"
   ],
   "host_permissions": [

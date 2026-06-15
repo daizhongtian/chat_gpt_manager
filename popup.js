@@ -245,7 +245,6 @@
       version: 1,
       total: 0,
       models: {},
-      events: [],
       createdAt: nowIso,
       lastRecordedAt: null,
       lastModelLabel: null
@@ -261,7 +260,6 @@
     const stats = Object.assign(fallback, raw);
     stats.total = Number(stats.total || 0);
     stats.models = stats.models && typeof stats.models === "object" ? stats.models : {};
-    stats.events = Array.isArray(stats.events) ? stats.events : [];
     return stats;
   }
 

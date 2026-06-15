@@ -265,8 +265,7 @@
 
     const now = Date.now();
     const modelLabel = detectCurrentModelLabel();
-    const conversationKey = getCurrentConversationKey();
-    const signature = `${conversationKey}|${modelLabel}|${Math.floor(now / 2500)}`;
+    const signature = `${modelLabel}|${Math.floor(now / 2500)}`;
 
     if (signature === state.lastUsageSignature || now - state.lastUsageStartedAt < 900) {
       return;
@@ -301,16 +300,6 @@
     modelStats.dates[day] = (modelStats.dates[day] || 0) + 1;
     modelStats.lastUsedAt = nowIso;
     stats.models[label] = modelStats;
-    stats.events.unshift({
-      id: `${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
-      model: label,
-      at: nowIso,
-      day,
-      reason,
-      conversation: getCurrentConversationKey()
-    });
-    stats.events = stats.events.slice(0, 80);
-
     await writeUsageStats(stats);
     logMessage(`Recorded usage: ${label}. Total tracked sends: ${stats.total}.`);
     return stats;
@@ -421,23 +410,12 @@
       .test(cleanText(text));
   }
 
-  function getCurrentConversationKey() {
-    try {
-      const url = new URL(location.href);
-      const match = url.pathname.match(/^\/c\/[^/?#]+/);
-      return match ? match[0] : url.pathname || "/";
-    } catch (error) {
-      return location.pathname || "/";
-    }
-  }
-
   function createEmptyUsageStats() {
     const nowIso = new Date().toISOString();
     return {
       version: 1,
       total: 0,
       models: {},
-      events: [],
       createdAt: nowIso,
       lastRecordedAt: null,
       lastModelLabel: null
@@ -453,7 +431,6 @@
     const stats = Object.assign(fallback, raw);
     stats.total = Number(stats.total || 0);
     stats.models = stats.models && typeof stats.models === "object" ? stats.models : {};
-    stats.events = Array.isArray(stats.events) ? stats.events : [];
 
     Object.keys(stats.models).forEach((label) => {
       const model = stats.models[label] || {};
@@ -1163,7 +1140,6 @@
     const entry = `${new Date().toLocaleTimeString()} - ${message}`;
     state.logs.unshift(entry);
     state.logs = state.logs.slice(0, 60);
-    console.info("[ChatGPT Cleaner]", message);
   }
 
   function estimateVisibleContext(contextWindowValue) {

@@ -218,6 +218,10 @@
         <a href="/c/mock-1">Planning notes</a>
         <button class="menu-button" aria-label="Open conversation options">...</button>
       </div>
+      <div class="conversation-row" data-title="Deletion failure case" data-fail-delete="true">
+        <a href="/c/mock-fail">Deletion failure case</a>
+        <button class="menu-button" aria-label="Open conversation options">...</button>
+      </div>
       <div class="conversation-row" data-title="中文和 English mixed chat">
         <a href="/c/mock-2">中文和 English mixed chat</a>
         <button class="menu-button" aria-label="Open conversation options">...</button>
@@ -263,6 +267,10 @@
         dialog.setAttribute("aria-modal", "true");
         dialog.innerHTML = '<strong>Delete chat?</strong><button type="button" data-confirm-delete>Delete</button>';
         dialog.querySelector("[data-confirm-delete]").addEventListener("click", () => {
+          if (row.dataset.failDelete === "true") {
+            dialog.remove();
+            return;
+          }
           row.remove();
           dialog.remove();
         });
