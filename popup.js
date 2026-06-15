@@ -24,7 +24,6 @@
     elements.status = byId("conversation-status");
     elements.estimateOutput = byId("estimate-output");
     elements.currentModel = byId("current-model");
-    elements.recordUsage = byId("record-usage");
     elements.refreshUsage = byId("refresh-usage");
     elements.resetUsage = byId("reset-usage");
     elements.usageOutput = byId("usage-output");
@@ -37,9 +36,9 @@
     elements.refresh.addEventListener("click", () => runAction("CCM_REFRESH_LIST"));
     elements.estimate.addEventListener("click", estimateContext);
     elements.contextEstimateEnabled.addEventListener("change", saveContextEstimateSetting);
-    elements.recordUsage.addEventListener("click", recordCurrentUsage);
     elements.refreshUsage.addEventListener("click", refreshUsageStats);
     elements.resetUsage.addEventListener("click", resetUsageStats);
+    bindUsageStorageRefresh();
   }
 
   async function refreshStatus() {
@@ -119,23 +118,6 @@
     }
   }
 
-  async function recordCurrentUsage() {
-    setBusy(true);
-
-    try {
-      const response = await sendToActiveTab({ type: "CCM_RECORD_USAGE_NOW" });
-      if (response.message) {
-        setStatus(response.message);
-      }
-      renderStatus(response.status);
-      renderUsageStats(response.usageStats);
-    } catch (error) {
-      setStatus(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function refreshUsageStats() {
     try {
       renderUsageStats(await readUsageStats());
@@ -194,7 +176,7 @@
 
     setStatus(status.isDeleting ? `Deleting... ${visibleText}` : visibleText);
     if (status.currentModel) {
-      elements.currentModel.textContent = status.currentModel;
+      elements.currentModel.textContent = status.currentModel === "Unknown model" ? "Auto tracking" : status.currentModel;
       elements.currentModel.title = status.currentModel;
     }
   }
@@ -325,7 +307,6 @@
       elements.deleteSelected,
       elements.refresh,
       elements.contextEstimateEnabled,
-      elements.recordUsage,
       elements.refreshUsage,
       elements.resetUsage
     ]
@@ -333,6 +314,20 @@
         button.disabled = isBusy;
       });
     applyContextEstimateAvailability(isBusy);
+  }
+
+  function bindUsageStorageRefresh() {
+    if (!globalThis.chrome || !chrome.storage || !chrome.storage.onChanged) {
+      return;
+    }
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local" || !changes[USAGE_STORAGE_KEY]) {
+        return;
+      }
+
+      renderUsageStats(changes[USAGE_STORAGE_KEY].newValue);
+    });
   }
 
   function byId(id) {

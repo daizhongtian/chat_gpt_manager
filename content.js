@@ -165,13 +165,9 @@
 
     state.usageTrackingInstalled = true;
 
-    document.addEventListener("click", (event) => {
-      const target = event.target instanceof Element ? event.target : null;
-      const button = target ? target.closest("button,[role='button']") : null;
-      if (button && isLikelySendButton(button)) {
-        scheduleUsageRecord("send-button", button);
-      }
-    }, true);
+    ["pointerdown", "click"].forEach((eventName) => {
+      document.addEventListener(eventName, handlePotentialSendAction, true);
+    });
 
     document.addEventListener("submit", (event) => {
       if (event.target instanceof Element && isLikelyComposerForm(event.target)) {
@@ -185,14 +181,26 @@
       }
     }, true);
 
-    document.addEventListener("input", (event) => {
-      const target = event.target instanceof Element ? event.target : null;
-      if (target && isLikelyComposerInput(target)) {
-        state.lastComposerActivityAt = Date.now();
-      }
-    }, true);
+    ["beforeinput", "input", "paste", "compositionend"].forEach((eventName) => {
+      document.addEventListener(eventName, markComposerActivity, true);
+    });
 
     installUsageMessageObserver();
+  }
+
+  function handlePotentialSendAction(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target ? target.closest("button,[role='button'],input[type='submit']") : null;
+    if (button && isLikelySendButton(button)) {
+      scheduleUsageRecord(`send-${event.type}`, button);
+    }
+  }
+
+  function markComposerActivity(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target && isLikelyComposerInput(target)) {
+      state.lastComposerActivityAt = Date.now();
+    }
   }
 
   function isLikelySendButton(button) {
@@ -208,12 +216,17 @@
       button.getAttribute("data-testid"),
       button.getAttribute("aria-label"),
       button.getAttribute("title"),
+      button.getAttribute("name"),
+      button.getAttribute("type"),
       button.textContent
     ].filter(Boolean).join(" "));
-    const hasSendLabel = /(send|submit|发送|提交|傳送|送出)/i.test(label);
+    const hasSendLabel = /(send|submit|\u53d1\u9001|\u63d0\u4ea4|\u50b3\u9001|\u9001\u51fa)/i.test(label);
     const hasSendTestId = /send/i.test(button.getAttribute("data-testid") || "");
+    const composerInput = findNearbyComposerInput(button);
+    const isSubmitButton = button.matches("input[type='submit'],button[type='submit']") ||
+      (button.tagName === "BUTTON" && !button.getAttribute("type") && Boolean(button.closest("form")));
 
-    return (hasSendLabel || hasSendTestId) && (hasSendTestId || Boolean(findNearbyComposerInput(button)));
+    return Boolean(composerInput) && (hasSendLabel || hasSendTestId || isSubmitButton);
   }
 
   function isLikelyComposerForm(form) {
@@ -250,9 +263,14 @@
       return false;
     }
 
-    return Boolean(element.closest("form,[data-testid*='composer' i],[class*='composer' i]")) ||
-      element.getAttribute("aria-label")?.toLowerCase().includes("message") ||
-      element.getAttribute("placeholder")?.toLowerCase().includes("message");
+    const dataTestId = element.getAttribute("data-testid") || "";
+    const ariaLabel = element.getAttribute("aria-label") || "";
+    const placeholder = element.getAttribute("placeholder") || "";
+
+    return Boolean(element.closest("form,[data-testid*='composer' i],[aria-label*='composer' i],[class*='composer' i]")) ||
+      /prompt|message|composer/i.test(dataTestId) ||
+      /prompt|message|\u6d88\u606f|\u63d0\u793a/i.test(ariaLabel) ||
+      /prompt|message|\u6d88\u606f|\u63d0\u793a/i.test(placeholder);
   }
 
   function findNearbyComposerInput(element) {
