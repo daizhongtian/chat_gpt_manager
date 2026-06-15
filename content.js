@@ -6,8 +6,10 @@
   const ENHANCED_ATTR = "data-ccm-enhanced";
   const DELETE_DELAY_MS = 650;
   const MENU_HOVER_DELAY_MS = 180;
-  const MEDIA_ESTIMATE_TIMEOUT_MS = 2500;
-  const PDF_FETCH_TIMEOUT_MS = 2500;
+  const MEDIA_ESTIMATE_TIMEOUT_MS = 6500;
+  const PDF_FETCH_TIMEOUT_MS = 5000;
+  const PDF_AUTO_ANALYSIS_LIMIT_BYTES = 20 * 1024 * 1024;
+  const PDF_AUTO_ANALYSIS_LIMIT = 3;
   const USAGE_STORAGE_KEY = "ccmUsageStats";
   const DEFAULT_MODEL_LABEL = "Unknown model";
 
@@ -779,6 +781,10 @@
     return String(text || "").replace(/\s+/g, " ").trim();
   }
 
+  function dedupeStrings(values) {
+    return Array.from(new Set(values.filter(Boolean)));
+  }
+
   function isVisibleElement(element) {
     if (!element || !(element instanceof Element)) {
       return false;
@@ -1334,30 +1340,12 @@
 
   function getVisiblePdfAttachments() {
     const main = document.querySelector("main") || document.body;
-    const candidates = Array.from(main.querySelectorAll("a[href], [aria-label], [title], [data-testid*='file' i], [data-testid*='attachment' i]"));
+    const candidates = collectPdfCandidateElements(main);
     const seen = new Set();
 
     return candidates
-      .filter((element) => !isInsideExtensionUi(element) && isRenderedElement(element))
-      .map((element) => {
-        const link = element.matches("a[href]") ? element : element.closest("a[href]");
-        const href = link ? link.href : "";
-        const label = cleanText([
-          element.getAttribute("aria-label"),
-          element.getAttribute("title"),
-          element.getAttribute("data-testid"),
-          element.textContent,
-          href
-        ].filter(Boolean).join(" "));
-
-        return {
-          key: href || label,
-          name: extractPdfName(label, href),
-          href,
-          fetchUrl: getFetchablePdfUrl(href)
-        };
-      })
-      .filter((attachment) => /\.pdf(?:$|[?#\s])|pdf document|application\/pdf/i.test(`${attachment.name} ${attachment.href}`))
+      .map((element) => createPdfAttachment(element))
+      .filter(Boolean)
       .filter((attachment) => {
         if (!attachment.key || seen.has(attachment.key)) {
           return false;
@@ -1365,6 +1353,241 @@
         seen.add(attachment.key);
         return true;
       });
+  }
+
+  function collectPdfCandidateElements(root) {
+    const selector = [
+      "a[href]",
+      "object[data]",
+      "embed[src]",
+      "iframe[src]",
+      "[download]",
+      "[aria-label]",
+      "[title]",
+      "[data-testid*='file' i]",
+      "[data-testid*='attachment' i]",
+      "[data-testid*='document' i]",
+      "[data-testid*='pdf' i]",
+      "[data-file-name]",
+      "[data-filename]",
+      "[data-name]",
+      "[data-file-id]",
+      "[data-url]",
+      "[data-href]",
+      "[data-src]",
+      "[data-file-url]",
+      "[data-download-url]",
+      "[data-content-url]"
+    ].join(",");
+    const elements = Array.from(root.querySelectorAll(selector));
+    const candidates = new Set();
+
+    elements.forEach((element) => {
+      if (isInsideExtensionUi(element) || !isRenderedElement(element)) {
+        return;
+      }
+
+      const container = findPdfAttachmentContainer(element);
+      if (container) {
+        candidates.add(container);
+      }
+      candidates.add(element);
+    });
+
+    return Array.from(candidates);
+  }
+
+  function findPdfAttachmentContainer(element) {
+    let node = element;
+    for (let depth = 0; node && depth < 5; depth += 1) {
+      if (isInsideExtensionUi(node)) {
+        return null;
+      }
+
+      const directLabel = getPdfElementDirectLabel(node);
+      const compactText = cleanText(node.textContent).slice(0, 320);
+      const isCompact = cleanText(node.textContent).length <= 320;
+      const isAttachmentLike = /file|attachment|document|pdf/i.test([
+        node.getAttribute("data-testid"),
+        node.getAttribute("role"),
+        node.className
+      ].filter(Boolean).join(" "));
+
+      if (isLikelyPdfText(directLabel) || (isAttachmentLike && isCompact && isLikelyPdfText(`${directLabel} ${compactText}`))) {
+        return node;
+      }
+
+      node = node.parentElement;
+    }
+
+    return element;
+  }
+
+  function createPdfAttachment(element) {
+    const sourceUrls = collectPdfSourceUrls(element);
+    const href = sourceUrls[0] || "";
+    const fetchUrl = sourceUrls.map((url) => getFetchablePdfUrl(url)).find(Boolean) || "";
+    const label = getPdfElementLabel(element, sourceUrls);
+
+    if (!isLikelyPdfText(`${label} ${sourceUrls.join(" ")}`)) {
+      return null;
+    }
+
+    return {
+      key: fetchUrl || href || getPdfElementStableKey(element, label),
+      name: extractPdfName(label, href),
+      href,
+      fetchUrl
+    };
+  }
+
+  function getPdfElementLabel(element, sourceUrls = []) {
+    const pieces = [
+      getPdfElementDirectLabel(element),
+      element.textContent,
+      ...sourceUrls
+    ];
+
+    collectAttributeStrings(element).forEach((value) => {
+      if (/\.pdf|application\/pdf|pdf document/i.test(value)) {
+        pieces.push(value);
+      }
+    });
+
+    return cleanText(pieces.filter(Boolean).join(" "));
+  }
+
+  function getPdfElementDirectLabel(element) {
+    const pieces = [
+      element.getAttribute("aria-label"),
+      element.getAttribute("title"),
+      element.getAttribute("download"),
+      element.getAttribute("type"),
+      element.getAttribute("data-testid"),
+      element.getAttribute("data-file-name"),
+      element.getAttribute("data-filename"),
+      element.getAttribute("data-name")
+    ];
+
+    collectAttributeStrings(element).forEach((value) => {
+      if (/\.pdf|application\/pdf|pdf document/i.test(value)) {
+        pieces.push(value);
+      }
+    });
+
+    return cleanText(pieces.filter(Boolean).join(" "));
+  }
+
+  function collectPdfSourceUrls(element) {
+    const urls = [];
+    const nodes = [element, ...Array.from(element.querySelectorAll ? element.querySelectorAll("[href],[src],[data],[download],[type],[aria-label],[title],[data-testid],[data-file-name],[data-filename],[data-name]") : [])];
+
+    nodes.slice(0, 80).forEach((node) => {
+      collectAttributeStrings(node, { includeDescendants: false }).forEach((value) => {
+        extractUrlLikeValues(value).forEach((url) => urls.push(url));
+      });
+    });
+
+    return dedupeStrings(urls)
+      .map((url) => normalizePdfSourceUrl(url))
+      .filter(Boolean);
+  }
+
+  function collectAttributeStrings(element) {
+    const values = [];
+    if (!element || !element.attributes) {
+      return values;
+    }
+
+    Array.from(element.attributes).forEach((attribute) => {
+      const name = attribute.name || "";
+      const value = attribute.value || "";
+      if (!value) {
+        return;
+      }
+
+      if (/^(href|src|data|download|type|title|aria-label|data-)/i.test(name)) {
+        values.push(value);
+        collectJsonStringValues(value).forEach((nestedValue) => values.push(nestedValue));
+      }
+    });
+
+    return values;
+  }
+
+  function collectJsonStringValues(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed || !/^[{[]/.test(trimmed)) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      const results = [];
+      const visit = (item, depth) => {
+        if (depth > 4 || item == null) {
+          return;
+        }
+
+        if (typeof item === "string") {
+          results.push(item);
+          return;
+        }
+
+        if (Array.isArray(item)) {
+          item.forEach((entry) => visit(entry, depth + 1));
+          return;
+        }
+
+        if (typeof item === "object") {
+          Object.keys(item).forEach((key) => visit(item[key], depth + 1));
+        }
+      };
+
+      visit(parsed, 0);
+      return results;
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function extractUrlLikeValues(value) {
+    const text = String(value || "");
+    const urls = [];
+    const urlPattern = /(https?:\/\/[^\s"'<>]+|blob:[^\s"'<>]+|data:application\/pdf[^ "'<>]+|\/[^\s"'<>]+(?:\.pdf|\/files?\/|\/attachments?\/)[^\s"'<>]*)/gi;
+    let match = urlPattern.exec(text);
+
+    while (match) {
+      urls.push(match[1].replace(/[),.;\]]+$/g, ""));
+      match = urlPattern.exec(text);
+    }
+
+    return urls;
+  }
+
+  function normalizePdfSourceUrl(value) {
+    if (!value) {
+      return "";
+    }
+
+    try {
+      return new URL(value, location.href).href;
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function isLikelyPdfText(text) {
+    return /\.pdf(?:$|[?#\s])|pdf document|application\/pdf|attached pdf|pdf file|\u9644\u4ef6.*pdf|pdf.*\u9644\u4ef6/i.test(String(text || ""));
+  }
+
+  function getPdfElementStableKey(element, label) {
+    const dataId = element.getAttribute("data-file-id") || element.getAttribute("data-id") || "";
+    if (dataId) {
+      return dataId;
+    }
+
+    return cleanText(label).slice(0, 160);
   }
 
   function extractPdfName(label, href) {
@@ -1380,7 +1603,7 @@
 
     try {
       const url = new URL(href, location.href);
-      if (url.protocol === "blob:" || url.protocol === "data:" || url.origin === location.origin) {
+      if (url.protocol === "blob:" || url.protocol === "data:" || url.origin === location.origin || isOpenAiFileHost(url.hostname)) {
         return url.href;
       }
     } catch (error) {
@@ -1388,6 +1611,10 @@
     }
 
     return "";
+  }
+
+  function isOpenAiFileHost(hostname) {
+    return /(^|\.)oaiusercontent\.com$/i.test(hostname || "");
   }
 
   async function estimatePdfAttachments(pdfs, contextWindow) {
@@ -1402,7 +1629,7 @@
     };
     const analyzer = globalThis.ChatGPTCleanerPdfAnalyzer;
 
-    for (const pdf of pdfs.slice(0, 3)) {
+    for (const pdf of pdfs.slice(0, PDF_AUTO_ANALYSIS_LIMIT)) {
       if (!pdf.fetchUrl || !analyzer || typeof analyzer.analyzeArrayBuffer !== "function") {
         summary.inaccessiblePdfCount += 1;
         continue;
@@ -1427,8 +1654,8 @@
       }
     }
 
-    if (pdfs.length > 3) {
-      summary.inaccessiblePdfCount += pdfs.length - 3;
+    if (pdfs.length > PDF_AUTO_ANALYSIS_LIMIT) {
+      summary.inaccessiblePdfCount += pdfs.length - PDF_AUTO_ANALYSIS_LIMIT;
     }
 
     return summary;
@@ -1439,21 +1666,24 @@
     const timeout = window.setTimeout(() => controller.abort(), PDF_FETCH_TIMEOUT_MS);
 
     try {
-      const response = await fetch(url, {
-        credentials: "include",
-        signal: controller.signal
-      });
+      const parsedUrl = new URL(url, location.href);
+      const fetchOptions = { signal: controller.signal };
+      if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+        fetchOptions.credentials = "include";
+      }
+
+      const response = await fetch(parsedUrl.href, fetchOptions);
       if (!response.ok) {
         throw new Error(`PDF fetch failed with ${response.status}`);
       }
 
       const length = Number(response.headers.get("content-length") || 0);
-      if (length > 20 * 1024 * 1024) {
+      if (length > PDF_AUTO_ANALYSIS_LIMIT_BYTES) {
         throw new Error("PDF is larger than the 20 MB auto-analysis limit.");
       }
 
       const arrayBuffer = await response.arrayBuffer();
-      if (arrayBuffer.byteLength > 20 * 1024 * 1024) {
+      if (arrayBuffer.byteLength > PDF_AUTO_ANALYSIS_LIMIT_BYTES) {
         throw new Error("PDF is larger than the 20 MB auto-analysis limit.");
       }
 

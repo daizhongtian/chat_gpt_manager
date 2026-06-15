@@ -57,7 +57,7 @@ The estimator first tries the bundled local `gpt-tokenizer`. If that fails, it f
 
 Usage percentage is calculated as `estimatedVisibleTokens / selectedContextWindow * 100`. The context window can be set to `16K`, `32K`, `64K`, `128K`, `256K`, `512K`, or `1M`.
 
-When context estimation is enabled, the extension also looks for loaded images and visible PDF attachments. Images are estimated locally from rendered dimensions. PDFs are analyzed locally with bundled `pdf.js` only when the browser can access the PDF data, such as same-origin or blob URLs. If ChatGPT shows a PDF chip but does not expose the original downloadable PDF data to the page, the extension reports the PDF as detected but inaccessible instead of guessing hidden backend tokens.
+When context estimation is enabled, the extension also looks for loaded images and visible PDF attachments. Images are estimated locally from rendered dimensions. PDFs are analyzed locally with bundled `pdf.js` only when the browser can access the PDF bytes. The scanner tries ordinary links, attachment-card metadata, embedded `object`/`embed`/`iframe` sources, `blob:` URLs, `data:application/pdf` URLs, ChatGPT same-origin URLs, and OpenAI file CDN URLs. If ChatGPT shows a PDF chip but exposes only a filename or file ID without readable bytes, the extension reports the PDF as detected but inaccessible instead of guessing hidden backend tokens.
 
 ### Usage Counter
 
@@ -77,7 +77,7 @@ Usage counts start after the extension is installed and loaded. The extension ca
 - The token/context count is only an estimate.
 - The estimate only reads message content currently loaded in the ChatGPT page.
 - It cannot see hidden system prompts, memory, tools, uploaded file content, file parsing results, backend-compressed context, or any other model-side context that is not visible in the page.
-- PDF analysis only works when the browser extension can access the actual PDF bytes from the page.
+- PDF analysis only works when the browser extension can access the actual PDF bytes from the page, a `blob:`/`data:` URL, a ChatGPT same-origin URL, or an OpenAI file CDN URL. It cannot read PDF bytes that exist only inside ChatGPT's backend state.
 - It cannot know the real backend model context window; the percentage uses the context window you choose in the popup.
 - Usage counting depends on visible ChatGPT UI labels and send controls. If ChatGPT changes its model picker or composer, automatic counting may miss or mislabel some sends.
 - Usage counting is not an official OpenAI quota meter. It cannot verify billing, subscription limits, backend model routing, retries, or messages sent from other browsers/devices.

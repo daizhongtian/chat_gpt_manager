@@ -246,6 +246,12 @@
       <article data-message-author-role="user">Please summarize this product idea and keep the tone practical.</article>
       <article data-message-author-role="assistant">Here is a concise summary with risks, next steps, and a launch checklist. See https://example.com/a/long/path?with=query for details.</article>
       <article data-message-author-role="user">这是一个混合中文和 English 的消息，用来测试 token 估算。const total = items.length + 42;</article>
+      <div class="mock-attachment" data-testid="file-attachment" aria-label="Attached file smoke-readable.pdf application/pdf">
+        <a id="mock-readable-pdf" type="application/pdf">smoke-readable.pdf</a>
+      </div>
+      <div class="mock-attachment" data-testid="file-attachment" data-file-id="file-hidden-pdf-1" aria-label="Attached file hidden-report.pdf application/pdf">
+        hidden-report.pdf
+      </div>
       <form class="mock-composer" aria-label="Message composer">
         <textarea aria-label="Message" placeholder="Message ChatGPT">Count this ChatGPT Pro message</textarea>
         <button type="submit" data-testid="send-button" aria-label="Send prompt">Send</button>
@@ -294,6 +300,32 @@
       event.currentTarget.before(article);
       textarea.value = "";
     });
+
+    function createMockPdfBlobUrl() {
+      const objects = [
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+        "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        "5 0 obj\n<< /Length 53 >>\nstream\nBT /F1 18 Tf 72 720 Td (Smoke readable PDF text) Tj ET\nendstream\nendobj\n"
+      ];
+      let pdf = "%PDF-1.4\n";
+      const offsets = [0];
+      objects.forEach((objectSource) => {
+        offsets.push(pdf.length);
+        pdf += objectSource;
+      });
+      const xrefOffset = pdf.length;
+      pdf += `xref\n0 ${offsets.length}\n`;
+      pdf += "0000000000 65535 f \n";
+      offsets.slice(1).forEach((offset) => {
+        pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+      });
+      pdf += `trailer\n<< /Root 1 0 R /Size ${offsets.length} >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+      return URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
+    }
+
+    document.getElementById("mock-readable-pdf").href = createMockPdfBlobUrl();
   </script>
   <script src="../vendor/chatgpt-cleaner-tokenizer.js"></script>
   <script src="../vendor/chatgpt-cleaner-pdf-analyzer.js"></script>
@@ -363,7 +395,8 @@
     document.getElementById("test-estimate").addEventListener("click", async () => {
       const api = await getApi();
       const estimate = await api.estimateVisibleContext(Number(document.getElementById("test-window").value));
-      showStatus(`${estimate.tokens} tokens, ${estimate.messages} messages, ${estimate.percentage.toFixed(2)}%, ${estimate.method}`);
+      window.__lastSmokeEstimate = estimate;
+      showStatus(`${estimate.tokens} tokens, ${estimate.messages} messages, ${estimate.percentage.toFixed(2)}%, ${estimate.method}, PDFs ${estimate.analyzedPdfCount}/${estimate.pdfCount}, PDF text ${estimate.pdfTextTokens}, inaccessible ${estimate.inaccessiblePdfCount}`);
     });
 
     document.getElementById("test-record-usage").addEventListener("click", async () => {
