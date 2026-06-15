@@ -4,8 +4,8 @@
   const TOAST_ID = "ccm-toast";
   const CHECKBOX_CLASS = "ccm-conversation-checkbox";
   const ENHANCED_ATTR = "data-ccm-enhanced";
-  const DELETE_DELAY_MS = 650;
-  const MENU_HOVER_DELAY_MS = 180;
+  const DELETE_DELAY_MS = 300;
+  const MENU_HOVER_DELAY_MS = 100;
   const MEDIA_ESTIMATE_TIMEOUT_MS = 6500;
   const PDF_FETCH_TIMEOUT_MS = 5000;
   const PDF_AUTO_ANALYSIS_LIMIT_BYTES = 20 * 1024 * 1024;
