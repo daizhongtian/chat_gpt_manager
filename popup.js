@@ -224,7 +224,7 @@
       rows.push(`<div class="metric"><span>PDF text</span><strong>${formatNumber(estimate.pdfTextTokens || 0)} tokens</strong></div>`);
       rows.push(`<div class="metric"><span>PDF image pages</span><strong>${formatNumber(estimate.pdfImagePages || 0)} / ${formatNumber(estimate.pdfImageTokens || 0)} tokens</strong></div>`);
       if (Number(estimate.inaccessiblePdfCount || 0) > 0) {
-        rows.push(`<div class="warning">${formatNumber(estimate.inaccessiblePdfCount)} PDF attachment(s) detected but not accessible to the browser extension.</div>`);
+        rows.push(`<div class="warning">${formatNumber(estimate.inaccessiblePdfCount)} PDF attachment(s) detected, but ChatGPT did not expose downloadable PDF data to this page.</div>`);
       }
     }
 
