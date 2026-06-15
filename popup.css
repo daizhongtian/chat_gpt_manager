@@ -162,6 +162,13 @@ button:disabled {
   letter-spacing: 0;
 }
 
+.estimate-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .estimate-panel > strong {
   font-size: 14px;
 }
@@ -213,7 +220,7 @@ button:disabled {
 
 .small-button {
   min-height: 28px;
-  max-width: 92px;
+  max-width: 118px;
   padding: 0 8px;
   font-size: 12px;
 }

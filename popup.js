@@ -3,11 +3,13 @@
 
   const USAGE_STORAGE_KEY = "ccmUsageStats";
   const SETTINGS_STORAGE_KEY = "ccmSettings";
+  const LOCAL_PDF_STORAGE_KEY = "ccmLocalPdfEstimates";
   const LOCAL_PDF_LIMIT_BYTES = 20 * 1024 * 1024;
   const elements = {};
   let activeEstimate = null;
   let localPdfEstimates = [];
   let pendingMissingAttachment = null;
+  let activeLocalPdfStorageKey = "";
 
   document.addEventListener("DOMContentLoaded", () => {
     cacheElements();
@@ -99,7 +101,8 @@
         contextWindow: selectedContextWindow
       });
       activeEstimate = response.estimate;
-      localPdfEstimates = [];
+      activeLocalPdfStorageKey = getEstimateStorageKey(activeEstimate);
+      localPdfEstimates = await readLocalPdfEstimates(activeLocalPdfStorageKey);
       pendingMissingAttachment = null;
       renderStatus(response.status);
       renderEstimate(activeEstimate);
@@ -130,14 +133,17 @@
 
   function handleEstimateOutputClick(event) {
     const button = event.target.closest("[data-action='add-local-pdf']");
-    if (!button) {
+    const batchButton = event.target.closest("[data-action='add-local-pdfs']");
+    if (!button && !batchButton) {
       return;
     }
 
-    pendingMissingAttachment = {
-      key: button.getAttribute("data-attachment-key") || "",
-      name: button.getAttribute("data-attachment-name") || ""
-    };
+    pendingMissingAttachment = button
+      ? {
+        key: button.getAttribute("data-attachment-key") || "",
+        name: button.getAttribute("data-attachment-name") || ""
+      }
+      : null;
     elements.localPdfInput.value = "";
     elements.localPdfInput.click();
   }
@@ -175,6 +181,13 @@
         }
       }
 
+      if (added.length) {
+        try {
+          await writeLocalPdfEstimates(activeLocalPdfStorageKey || getEstimateStorageKey(activeEstimate), localPdfEstimates);
+        } catch (error) {
+          failures.push(`Could not save local PDF estimates: ${error.message}`);
+        }
+      }
       renderEstimate(activeEstimate);
       if (added.length) {
         setStatus(`Added ${formatNumber(added.length)} local PDF estimate${added.length === 1 ? "" : "s"}.`);
@@ -217,7 +230,8 @@
       imageTokens,
       pages: Number(result.pages || 0),
       imagePages: Number(result.imagePages || 0),
-      scannedLikePages: Number(result.scannedLikePages || 0)
+      scannedLikePages: Number(result.scannedLikePages || 0),
+      addedAt: new Date().toISOString()
     };
   }
 
@@ -236,6 +250,80 @@
     const missing = normalizeAttachmentList(activeEstimate && activeEstimate.missingAttachments);
     const match = missing.find((attachment) => normalizeFileName(attachment.name) === normalizeFileName(name));
     return match ? match.key || "" : "";
+  }
+
+  function getEstimateStorageKey(estimate) {
+    const key = estimate && (estimate.conversationKey || estimate.conversationUrl);
+    return key ? String(key).slice(0, 240) : "unknown-conversation";
+  }
+
+  async function readLocalPdfEstimates(storageKey) {
+    if (!storageKey || !globalThis.chrome || !chrome.storage || !chrome.storage.local) {
+      return [];
+    }
+
+    return new Promise((resolve) => {
+      chrome.storage.local.get([LOCAL_PDF_STORAGE_KEY], (items) => {
+        const store = normalizeLocalPdfStore(items && items[LOCAL_PDF_STORAGE_KEY]);
+        resolve(normalizeAttachmentList(store[storageKey]).map(normalizeLocalPdfEstimate).filter(Boolean));
+      });
+    });
+  }
+
+  async function writeLocalPdfEstimates(storageKey, estimates) {
+    if (!storageKey || !globalThis.chrome || !chrome.storage || !chrome.storage.local) {
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get([LOCAL_PDF_STORAGE_KEY], (items) => {
+        const store = normalizeLocalPdfStore(items && items[LOCAL_PDF_STORAGE_KEY]);
+        store[storageKey] = normalizeAttachmentList(estimates)
+          .map(normalizeLocalPdfEstimate)
+          .filter(Boolean)
+          .slice(-40);
+
+        chrome.storage.local.set({ [LOCAL_PDF_STORAGE_KEY]: store }, () => {
+          const error = chrome.runtime && chrome.runtime.lastError;
+          if (error) {
+            reject(new Error(error.message));
+            return;
+          }
+          resolve();
+        });
+      });
+    });
+  }
+
+  function normalizeLocalPdfStore(raw) {
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  }
+
+  function normalizeLocalPdfEstimate(raw) {
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+
+    const tokens = Number(raw.tokens || 0);
+    if (!Number.isFinite(tokens) || tokens <= 0) {
+      return null;
+    }
+
+    return {
+      kind: "pdf",
+      key: String(raw.key || `local:${raw.name || "pdf"}`),
+      matchedMissingKey: String(raw.matchedMissingKey || ""),
+      name: String(raw.name || "Local PDF"),
+      source: "Local PDF upload",
+      status: "Counted",
+      tokens,
+      textTokens: Number(raw.textTokens || 0),
+      imageTokens: Number(raw.imageTokens || 0),
+      pages: Number(raw.pages || 0),
+      imagePages: Number(raw.imagePages || 0),
+      scannedLikePages: Number(raw.scannedLikePages || 0),
+      addedAt: raw.addedAt || null
+    };
   }
 
   async function refreshUsageStats() {
@@ -369,7 +457,10 @@
 
     return `
       <div class="estimate-panel">
-        <h3>Missing attachments</h3>
+        <div class="estimate-panel-heading">
+          <h3>Missing attachments</h3>
+          <button type="button" class="small-button" data-action="add-local-pdfs">Add local PDFs</button>
+        </div>
         <div class="attachment-list">
           ${items.map((attachment) => `
             <div class="attachment-item missing-attachment">
@@ -417,8 +508,10 @@
   }
 
   function applyLocalPdfEstimates(estimate) {
-    const countedAttachments = normalizeAttachmentList(estimate.countedAttachments);
-    let missingAttachments = normalizeAttachmentList(estimate.missingAttachments);
+    const countedAttachments = normalizeAttachmentList(estimate.countedAttachments)
+      .map((attachment) => Object.assign({}, attachment));
+    let missingAttachments = normalizeAttachmentList(estimate.missingAttachments)
+      .map((attachment) => Object.assign({}, attachment));
 
     localPdfEstimates.forEach((localAttachment) => {
       missingAttachments = missingAttachments.filter((missing) => !attachmentMatchesLocalPdf(missing, localAttachment));

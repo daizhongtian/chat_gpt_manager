@@ -1184,6 +1184,8 @@
       messages: messages.length,
       selectedContextWindow,
       contextWindow: selectedContextWindow,
+      conversationKey: getCurrentConversationKey(),
+      conversationUrl: location.href,
       percentage,
       method: estimate.method,
       cjkCharacters: estimate.cjkCharacters,
@@ -2008,6 +2010,11 @@
     return values.reduce((total, value) => total + value, 0);
   }
 
+  function getCurrentConversationKey() {
+    const match = location.pathname.match(/\/c\/([^/?#]+)/);
+    return match ? `/c/${match[1]}` : location.pathname || location.href;
+  }
+
   function getStatus() {
     const visible = state.isActivated ? getConversationLinks().length : 0;
     return {
@@ -2015,6 +2022,8 @@
       isDeleting: state.isDeleting,
       selected: state.selectedConversationKeys.size,
       visible,
+      conversationKey: getCurrentConversationKey(),
+      conversationUrl: location.href,
       currentModel: detectCurrentModelLabel(),
       usageTrackingInstalled: state.usageTrackingInstalled,
       lastEstimate: state.lastEstimate,

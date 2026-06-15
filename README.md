@@ -59,7 +59,7 @@ Usage percentage is calculated as `estimatedVisibleTokens / selectedContextWindo
 
 When context estimation is enabled, the extension also looks for loaded images and visible PDF attachments. Images are estimated locally from rendered dimensions. PDFs are analyzed locally with bundled `pdf.js` only when the browser can access the PDF bytes. The scanner tries ordinary links, attachment-card metadata, embedded `object`/`embed`/`iframe` sources, `blob:` URLs, `data:application/pdf` URLs, ChatGPT same-origin URLs, and OpenAI file CDN URLs. If ChatGPT shows a PDF chip but exposes only a filename or file ID without readable bytes, the extension reports the PDF as detected but inaccessible instead of guessing hidden backend tokens.
 
-If a detected PDF is missing because the browser cannot access its bytes, the popup shows it under **Missing attachments** with an **Add local PDF** button. Selecting the matching local PDF analyzes that file in the browser, moves the item into **Counted attachments**, and updates the visible token total. The selected local PDF is not uploaded anywhere.
+If a detected PDF is missing because the browser cannot access its bytes, the popup shows it under **Missing attachments** with **Add local PDF** and **Add local PDFs** controls. Selecting one or more matching local PDFs analyzes those files in the browser, moves matched items into **Counted attachments**, and updates the visible token total. The selected local PDFs are not uploaded anywhere. Only the local estimate metadata, such as name, pages, and token counts, is saved in Chrome local storage so refreshes can keep the matched PDF estimates.
 
 ### Usage Counter
 
