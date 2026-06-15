@@ -18,7 +18,7 @@
       top: 0;
       z-index: 5;
       display: grid;
-      grid-template-columns: repeat(8, auto) 1fr;
+      grid-template-columns: repeat(10, auto) 1fr;
       align-items: center;
       gap: 8px;
       border-bottom: 1px solid #dcdfe4;
@@ -200,6 +200,8 @@
     <button type="button" id="test-record-usage">Record Usage</button>
     <button type="button" id="test-reset-usage">Reset Usage</button>
     <button type="button" id="test-read-usage">Read Usage</button>
+    <button type="button" id="test-use-gpt">Use GPT</button>
+    <button type="button" id="test-use-pro">Use GPT Pro</button>
     <label>
       <span class="sr-only">Context window</span>
       <select id="test-window">
@@ -314,6 +316,20 @@
       status.textContent = message;
     }
 
+    function formatUsageStatus(stats) {
+      const gpt = stats.categories && stats.categories.GPT ? stats.categories.GPT.total : 0;
+      const pro = stats.categories && stats.categories["GPT Pro"] ? stats.categories["GPT Pro"].total : 0;
+      return `Usage total: ${stats.total}; GPT ${gpt}; GPT Pro ${pro}`;
+    }
+
+    function setMockModel(label) {
+      const button = document.querySelector(".mock-model-button");
+      button.textContent = label;
+      button.setAttribute("aria-label", `Current model ${label}`);
+      document.querySelector(".mock-composer textarea").value = `Count this ${label} message`;
+      showStatus(`Model set: ${label}`);
+    }
+
     document.getElementById("test-select").addEventListener("click", async () => {
       const api = await getApi();
       api.activateConversationTools();
@@ -347,7 +363,7 @@
     document.getElementById("test-record-usage").addEventListener("click", async () => {
       const api = await getApi();
       const stats = await api.recordModelUsage("smoke-manual");
-      showStatus(`${stats.lastModelLabel}: ${stats.models[stats.lastModelLabel].total} / total ${stats.total}`);
+      showStatus(`${stats.lastModelLabel}: ${stats.models[stats.lastModelLabel].total}; ${formatUsageStatus(stats)}`);
     });
 
     document.getElementById("test-reset-usage").addEventListener("click", async () => {
@@ -359,7 +375,15 @@
     document.getElementById("test-read-usage").addEventListener("click", async () => {
       const api = await getApi();
       const stats = await api.readUsageStats();
-      showStatus(`Usage total: ${stats.total}`);
+      showStatus(formatUsageStatus(stats));
+    });
+
+    document.getElementById("test-use-gpt").addEventListener("click", () => {
+      setMockModel("GPT-5");
+    });
+
+    document.getElementById("test-use-pro").addEventListener("click", () => {
+      setMockModel("GPT-5 Pro");
     });
   </script>
 </body>

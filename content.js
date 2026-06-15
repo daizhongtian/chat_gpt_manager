@@ -18,9 +18,12 @@
     logs: [],
     selectedConversationKeys: new Set(),
     usageTrackingInstalled: false,
+    usageMessageObserver: null,
+    seenUserMessageKeys: new Set(),
     pendingUsageTimer: null,
     lastUsageSignature: "",
     lastUsageStartedAt: 0,
+    lastComposerActivityAt: 0,
     memoryUsageStats: createEmptyUsageStats()
   };
 
@@ -179,6 +182,15 @@
         scheduleUsageRecord("enter-key", event.target);
       }
     }, true);
+
+    document.addEventListener("input", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && isLikelyComposerInput(target)) {
+        state.lastComposerActivityAt = Date.now();
+      }
+    }, true);
+
+    installUsageMessageObserver();
   }
 
   function isLikelySendButton(button) {
@@ -220,14 +232,25 @@
       return false;
     }
 
-    const isTextInput = target.matches("textarea,[contenteditable='true'],[role='textbox']");
-    if (!isTextInput || !hasComposerContent(target)) {
+    if (!isLikelyComposerInput(target) || !hasComposerContent(target)) {
       return false;
     }
 
-    return Boolean(target.closest("form,[data-testid*='composer' i],[class*='composer' i]")) ||
-      target.getAttribute("aria-label")?.toLowerCase().includes("message") ||
-      target.getAttribute("placeholder")?.toLowerCase().includes("message");
+    return true;
+  }
+
+  function isLikelyComposerInput(element) {
+    if (!element || isInsideExtensionUi(element)) {
+      return false;
+    }
+
+    if (!element.matches("textarea,[contenteditable='true'],[role='textbox']")) {
+      return false;
+    }
+
+    return Boolean(element.closest("form,[data-testid*='composer' i],[class*='composer' i]")) ||
+      element.getAttribute("aria-label")?.toLowerCase().includes("message") ||
+      element.getAttribute("placeholder")?.toLowerCase().includes("message");
   }
 
   function findNearbyComposerInput(element) {
@@ -257,12 +280,79 @@
     return cleanText(text).length > 0;
   }
 
+  function installUsageMessageObserver() {
+    if (state.usageMessageObserver || !document.body) {
+      return;
+    }
+
+    seedSeenUserMessages();
+
+    state.usageMessageObserver = new MutationObserver((mutations) => {
+      if (Date.now() - state.lastComposerActivityAt > 12000) {
+        return;
+      }
+
+      for (const mutation of mutations) {
+        mutation.addedNodes.forEach((node) => {
+          collectUserMessageElements(node).forEach((element) => {
+            const key = getUserMessageKey(element);
+            if (!key || state.seenUserMessageKeys.has(key)) {
+              return;
+            }
+
+            state.seenUserMessageKeys.add(key);
+            scheduleUsageRecord("new-user-message", null);
+          });
+        });
+      }
+    });
+
+    state.usageMessageObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  function seedSeenUserMessages() {
+    collectUserMessageElements(document.body).forEach((element) => {
+      const key = getUserMessageKey(element);
+      if (key) {
+        state.seenUserMessageKeys.add(key);
+      }
+    });
+  }
+
+  function collectUserMessageElements(root) {
+    if (!root || !(root instanceof Element)) {
+      return [];
+    }
+
+    const selector = '[data-message-author-role="user"], article[data-message-author-role="user"]';
+    const elements = root.matches(selector)
+      ? [root]
+      : Array.from(root.querySelectorAll(selector));
+
+    return elements.filter((element) => !isInsideExtensionUi(element) && isRenderedElement(element));
+  }
+
+  function getUserMessageKey(element) {
+    const text = extractReadableText(element);
+    if (!text) {
+      return "";
+    }
+
+    return `${text.length}:${text.slice(0, 240)}`;
+  }
+
   function scheduleUsageRecord(reason, sourceElement) {
     if (sourceElement && !hasComposerContent(sourceElement)) {
       return;
     }
 
     const now = Date.now();
+    if (sourceElement) {
+      state.lastComposerActivityAt = now;
+    }
     const modelLabel = detectCurrentModelLabel();
     const signature = `${modelLabel}|${Math.floor(now / 2500)}`;
 
@@ -282,25 +372,28 @@
 
   async function recordModelUsage(reason, modelLabel) {
     const label = normalizeModelLabel(modelLabel || detectCurrentModelLabel());
+    const category = classifyUsageCategory(label);
     const stats = normalizeUsageStats(await readUsageStats());
     const now = new Date();
     const nowIso = now.toISOString();
     const day = localDateKey(now);
-    const modelStats = stats.models[label] || {
-      total: 0,
-      dates: {},
-      lastUsedAt: null
-    };
+    const modelStats = stats.models[label] || createEmptyUsageBucket();
+    const categoryStats = stats.categories[category] || createEmptyUsageBucket();
 
     stats.total += 1;
     stats.lastModelLabel = label;
+    stats.lastCategory = category;
     stats.lastRecordedAt = nowIso;
     modelStats.total += 1;
     modelStats.dates[day] = (modelStats.dates[day] || 0) + 1;
     modelStats.lastUsedAt = nowIso;
+    categoryStats.total += 1;
+    categoryStats.dates[day] = (categoryStats.dates[day] || 0) + 1;
+    categoryStats.lastUsedAt = nowIso;
     stats.models[label] = modelStats;
+    stats.categories[category] = categoryStats;
     await writeUsageStats(stats);
-    logMessage(`Recorded usage: ${label}. Total tracked sends: ${stats.total}.`);
+    logMessage(`Recorded usage: ${label} (${category}). Total tracked sends: ${stats.total}.`);
     return stats;
   }
 
@@ -409,15 +502,37 @@
       .test(cleanText(text));
   }
 
+  function classifyUsageCategory(label) {
+    const source = cleanText(label);
+    if (/(^|[\s-])Pro($|[\s-])|ChatGPT\s*Pro|GPT[-\s]?(?:5|4o|4\.1|4|3\.5)?\s*Pro|\bo[134][-\s]*Pro\b/i.test(source)) {
+      return "GPT Pro";
+    }
+
+    return "GPT";
+  }
+
   function createEmptyUsageStats() {
     const nowIso = new Date().toISOString();
     return {
-      version: 1,
+      version: 2,
       total: 0,
       models: {},
+      categories: {
+        GPT: createEmptyUsageBucket(),
+        "GPT Pro": createEmptyUsageBucket()
+      },
       createdAt: nowIso,
       lastRecordedAt: null,
-      lastModelLabel: null
+      lastModelLabel: null,
+      lastCategory: null
+    };
+  }
+
+  function createEmptyUsageBucket() {
+    return {
+      total: 0,
+      dates: {},
+      lastUsedAt: null
     };
   }
 
@@ -430,6 +545,7 @@
     const stats = Object.assign(fallback, raw);
     stats.total = Number(stats.total || 0);
     stats.models = stats.models && typeof stats.models === "object" ? stats.models : {};
+    stats.categories = stats.categories && typeof stats.categories === "object" ? stats.categories : null;
 
     Object.keys(stats.models).forEach((label) => {
       const model = stats.models[label] || {};
@@ -439,7 +555,37 @@
       stats.models[label] = model;
     });
 
+    if (!stats.categories) {
+      stats.categories = {
+        GPT: createEmptyUsageBucket(),
+        "GPT Pro": createEmptyUsageBucket()
+      };
+
+      Object.entries(stats.models).forEach(([label, model]) => {
+        mergeUsageBucket(stats.categories[classifyUsageCategory(label)], model);
+      });
+    } else {
+      ["GPT", "GPT Pro"].forEach((category) => {
+        const bucket = stats.categories[category] || {};
+        bucket.total = Number(bucket.total || 0);
+        bucket.dates = bucket.dates && typeof bucket.dates === "object" ? bucket.dates : {};
+        bucket.lastUsedAt = bucket.lastUsedAt || null;
+        stats.categories[category] = bucket;
+      });
+    }
+
     return stats;
+  }
+
+  function mergeUsageBucket(target, source) {
+    target.total += Number(source.total || 0);
+    Object.entries(source.dates || {}).forEach(([date, count]) => {
+      target.dates[date] = (target.dates[date] || 0) + Number(count || 0);
+    });
+
+    if (!target.lastUsedAt || (source.lastUsedAt && source.lastUsedAt > target.lastUsedAt)) {
+      target.lastUsedAt = source.lastUsedAt || target.lastUsedAt;
+    }
   }
 
   async function readUsageStats() {

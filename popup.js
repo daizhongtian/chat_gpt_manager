@@ -181,7 +181,19 @@
 
   function renderUsageStats(stats) {
     const usage = normalizeUsageStats(stats);
-    const rows = Object.entries(usage.models)
+    const categoryRows = [
+      {
+        label: "GPT",
+        total: Number(usage.categories.GPT?.total || 0),
+        title: "普通 GPT model sends"
+      },
+      {
+        label: "GPT Pro",
+        total: Number(usage.categories["GPT Pro"]?.total || 0),
+        title: "GPT Pro model sends"
+      }
+    ];
+    const modelRows = Object.entries(usage.models)
       .map(([label, value]) => ({
         label,
         total: Number(value.total || 0),
@@ -190,24 +202,27 @@
       .filter((item) => item.total > 0)
       .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
 
-    if (!rows.length) {
-      elements.usageOutput.innerHTML = `
-        <div class="metric"><span>Tracked sends</span><strong>0</strong></div>
-        <div class="warning">No usage counted yet. Send a ChatGPT message or click Record current model.</div>
-      `;
-      return;
-    }
-
     elements.usageOutput.innerHTML = `
       <div class="metric"><span>Tracked sends</span><strong>${formatNumber(usage.total)}</strong></div>
-      <div class="usage-list">
-        ${rows.map((row) => `
-          <div class="usage-row" title="${escapeHtml(row.label)}">
+      <div class="usage-list usage-categories">
+        ${categoryRows.map((row) => `
+          <div class="usage-row usage-category-row" title="${escapeHtml(row.title)}">
             <span>${escapeHtml(row.label)}</span>
             <strong>${formatNumber(row.total)}</strong>
           </div>
         `).join("")}
       </div>
+      ${modelRows.length ? `
+        <div class="usage-subtitle">Model details</div>
+        <div class="usage-list">
+          ${modelRows.map((row) => `
+            <div class="usage-row" title="${escapeHtml(row.label)}">
+              <span>${escapeHtml(row.label)}</span>
+              <strong>${formatNumber(row.total)}</strong>
+            </div>
+          `).join("")}
+        </div>
+      ` : '<div class="warning">No usage counted yet. Send a ChatGPT message; counting is automatic.</div>'}
     `;
   }
 
@@ -242,12 +257,25 @@
   function createEmptyUsageStats() {
     const nowIso = new Date().toISOString();
     return {
-      version: 1,
+      version: 2,
       total: 0,
       models: {},
+      categories: {
+        GPT: createEmptyUsageBucket(),
+        "GPT Pro": createEmptyUsageBucket()
+      },
       createdAt: nowIso,
       lastRecordedAt: null,
-      lastModelLabel: null
+      lastModelLabel: null,
+      lastCategory: null
+    };
+  }
+
+  function createEmptyUsageBucket() {
+    return {
+      total: 0,
+      dates: {},
+      lastUsedAt: null
     };
   }
 
@@ -260,7 +288,56 @@
     const stats = Object.assign(fallback, raw);
     stats.total = Number(stats.total || 0);
     stats.models = stats.models && typeof stats.models === "object" ? stats.models : {};
+    stats.categories = stats.categories && typeof stats.categories === "object" ? stats.categories : null;
+
+    Object.keys(stats.models).forEach((label) => {
+      const model = stats.models[label] || {};
+      model.total = Number(model.total || 0);
+      model.dates = model.dates && typeof model.dates === "object" ? model.dates : {};
+      model.lastUsedAt = model.lastUsedAt || null;
+      stats.models[label] = model;
+    });
+
+    if (!stats.categories) {
+      stats.categories = {
+        GPT: createEmptyUsageBucket(),
+        "GPT Pro": createEmptyUsageBucket()
+      };
+
+      Object.entries(stats.models).forEach(([label, model]) => {
+        mergeUsageBucket(stats.categories[classifyUsageCategory(label)], model);
+      });
+    } else {
+      ["GPT", "GPT Pro"].forEach((category) => {
+        const bucket = stats.categories[category] || {};
+        bucket.total = Number(bucket.total || 0);
+        bucket.dates = bucket.dates && typeof bucket.dates === "object" ? bucket.dates : {};
+        bucket.lastUsedAt = bucket.lastUsedAt || null;
+        stats.categories[category] = bucket;
+      });
+    }
+
     return stats;
+  }
+
+  function classifyUsageCategory(label) {
+    const source = String(label || "").trim();
+    if (/(^|[\s-])Pro($|[\s-])|ChatGPT\s*Pro|GPT[-\s]?(?:5|4o|4\.1|4|3\.5)?\s*Pro|\bo[134][-\s]*Pro\b/i.test(source)) {
+      return "GPT Pro";
+    }
+
+    return "GPT";
+  }
+
+  function mergeUsageBucket(target, source) {
+    target.total += Number(source.total || 0);
+    Object.entries(source.dates || {}).forEach(([date, count]) => {
+      target.dates[date] = (target.dates[date] || 0) + Number(count || 0);
+    });
+
+    if (!target.lastUsedAt || (source.lastUsedAt && source.lastUsedAt > target.lastUsedAt)) {
+      target.lastUsedAt = source.lastUsedAt || target.lastUsedAt;
+    }
   }
 
   async function readUsageStats() {

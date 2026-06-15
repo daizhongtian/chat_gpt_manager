@@ -152,6 +152,10 @@ button:disabled {
   gap: 6px;
 }
 
+.usage-categories {
+  gap: 7px;
+}
+
 .usage-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -163,6 +167,20 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.usage-category-row {
+  border: 1px solid #e2e2e2;
+  border-radius: 6px;
+  background: #fafafa;
+  padding: 7px 9px;
+}
+
+.usage-subtitle {
+  margin-top: 2px;
+  color: #5f6368;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -178,7 +196,8 @@ button:disabled {
   .popup-header p,
   .status,
   .footnote,
-  .warning {
+  .warning,
+  .usage-subtitle {
     color: #b9b9b9;
   }
 
@@ -200,5 +219,10 @@ button:disabled {
 
   .meter {
     background: #454545;
+  }
+
+  .usage-category-row {
+    border-color: #3a3a3a;
+    background: #262626;
   }
 }

@@ -53,7 +53,8 @@ The estimator is local and dependency-free. It uses a conservative heuristic for
 The popup includes a **Usage Counter** section.
 
 - The extension automatically tries to count a usage when you send a ChatGPT message.
-- It reads the currently visible model/mode label, for example `ChatGPT Pro`, `GPT-4o`, or `Deep Research`.
+- It reads the currently visible model/mode label, for example `GPT-5`, `GPT-5 Pro`, `ChatGPT Pro`, `GPT-4o`, or `Deep Research`.
+- It groups automatic counts into `GPT` and `GPT Pro`, while still keeping per-model details.
 - Click **Record current model** if the automatic listener misses a send or if you want to manually count one use.
 - Click **Refresh usage** to reload the local counts.
 - Click **Reset usage** to clear all local usage counts.
