@@ -57,7 +57,7 @@ The estimator first tries the bundled local `gpt-tokenizer`. If that fails, it f
 - URL/JSON-like text: characters / 2.5
 - Emoji: about 3 tokens each
 
-Usage percentage is calculated as `estimatedVisibleTokens / selectedContextWindow * 100`. The context window can be set to `16K`, `32K`, `64K`, `128K`, or a custom token value.
+Usage percentage is calculated as `estimatedVisibleTokens / selectedContextWindow * 100`. The context window can be set to `16K`, `32K`, `64K`, or `128K`.
 
 When context estimation is enabled, the extension also looks for loaded images and visible PDF attachments. Images are estimated locally from rendered dimensions. PDFs are analyzed locally with bundled `pdf.js` only when the browser can access the PDF data, such as same-origin or blob URLs. If ChatGPT does not expose the original PDF file to the page, the extension reports the PDF as detected but inaccessible instead of guessing hidden backend tokens.
 

@@ -21,8 +21,6 @@
     elements.estimate = byId("estimate-context");
     elements.contextEstimateEnabled = byId("context-estimate-enabled");
     elements.contextWindow = byId("context-window");
-    elements.customContextRow = byId("custom-context-row");
-    elements.customContextWindow = byId("custom-context-window");
     elements.status = byId("conversation-status");
     elements.estimateOutput = byId("estimate-output");
     elements.currentModel = byId("current-model");
@@ -39,7 +37,6 @@
     elements.refresh.addEventListener("click", () => runAction("CCM_REFRESH_LIST"));
     elements.estimate.addEventListener("click", estimateContext);
     elements.contextEstimateEnabled.addEventListener("change", saveContextEstimateSetting);
-    elements.contextWindow.addEventListener("change", updateCustomContextVisibility);
     elements.recordUsage.addEventListener("click", recordCurrentUsage);
     elements.refreshUsage.addEventListener("click", refreshUsageStats);
     elements.resetUsage.addEventListener("click", resetUsageStats);
@@ -90,7 +87,7 @@
     elements.estimateOutput.textContent = "Estimating loaded context...";
 
     try {
-      const selectedContextWindow = getSelectedContextWindow();
+      const selectedContextWindow = Number(elements.contextWindow.value || 128000);
       const response = await sendToActiveTab({
         type: "CCM_ESTIMATE_CONTEXT",
         contextWindow: selectedContextWindow
@@ -98,7 +95,7 @@
       renderStatus(response.status);
       renderEstimate(response.estimate);
     } catch (error) {
-      elements.estimateOutput.textContent = "";
+      elements.estimateOutput.innerHTML = `<div class="warning">${escapeHtml(error.message)}</div>`;
       setStatus(error.message);
     } finally {
       setBusy(false);
@@ -228,6 +225,14 @@
 
   function renderMediaRows(estimate) {
     const rows = [];
+    if (estimate.mediaTimedOut) {
+      rows.push('<div class="warning">Media/PDF analysis timed out; showing the visible text estimate first.</div>');
+    }
+
+    if (estimate.mediaError) {
+      rows.push(`<div class="warning">Media/PDF analysis failed: ${escapeHtml(estimate.mediaError)}</div>`);
+    }
+
     if (Number(estimate.imageCount || 0) > 0) {
       rows.push(`<div class="metric"><span>Images</span><strong>${formatNumber(estimate.imageCount)} / ${formatNumber(estimate.imageTokens)} tokens</strong></div>`);
     }
@@ -252,15 +257,6 @@
     return "Local fallback";
   }
 
-  function updateCustomContextVisibility() {
-    const isCustom = elements.contextWindow.value === "custom";
-    elements.customContextRow.classList.toggle("hidden", !isCustom || !isContextEstimateEnabled());
-
-    if (isCustom) {
-      elements.customContextWindow.value = sanitizeContextWindow(elements.customContextWindow.value);
-    }
-  }
-
   function isContextEstimateEnabled() {
     return Boolean(elements.contextEstimateEnabled && elements.contextEstimateEnabled.checked);
   }
@@ -268,26 +264,7 @@
   function applyContextEstimateAvailability(isBusy) {
     const enabled = isContextEstimateEnabled();
     elements.contextWindow.disabled = isBusy || !enabled;
-    elements.customContextWindow.disabled = isBusy || !enabled;
     elements.estimate.disabled = isBusy || !enabled;
-    updateCustomContextVisibility();
-  }
-
-  function getSelectedContextWindow() {
-    if (elements.contextWindow.value === "custom") {
-      return Number(sanitizeContextWindow(elements.customContextWindow.value));
-    }
-
-    return Number(elements.contextWindow.value || 128000);
-  }
-
-  function sanitizeContextWindow(value) {
-    const numeric = Math.floor(Number(value || 0));
-    if (!Number.isFinite(numeric) || numeric < 1000) {
-      return "1000";
-    }
-
-    return String(numeric);
   }
 
   function renderUsageStats(stats) {
@@ -296,7 +273,7 @@
       {
         label: "GPT",
         total: Number(usage.categories.GPT?.total || 0),
-        title: "普通 GPT model sends"
+        title: "Regular GPT model sends"
       },
       {
         label: "GPT Pro",

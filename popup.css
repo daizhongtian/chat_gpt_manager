@@ -70,8 +70,7 @@ body {
 }
 
 button,
-select,
-input[type="number"] {
+select {
   min-height: 32px;
   border: 1px solid #d6d6d6;
   border-radius: 6px;
@@ -80,13 +79,8 @@ input[type="number"] {
   font: inherit;
 }
 
-input[type="number"] {
-  box-sizing: border-box;
-  width: 112px;
-  padding: 0 8px;
-}
-
-.hidden {
+.hidden,
+.field.hidden {
   display: none;
 }
 
@@ -230,8 +224,7 @@ button:disabled {
   }
 
   button,
-  select,
-  input[type="number"] {
+  select {
     border-color: #454545;
     background: #2f2f2f;
     color: #f3f3f3;

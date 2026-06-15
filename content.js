@@ -6,6 +6,8 @@
   const CHECKBOX_CLASS = "ccm-conversation-checkbox";
   const ENHANCED_ATTR = "data-ccm-enhanced";
   const DELETE_DELAY_MS = 1400;
+  const MEDIA_ESTIMATE_TIMEOUT_MS = 2500;
+  const PDF_FETCH_TIMEOUT_MS = 2500;
   const USAGE_STORAGE_KEY = "ccmUsageStats";
   const DEFAULT_MODEL_LABEL = "Unknown model";
 
@@ -1199,9 +1201,9 @@
     const messages = getVisibleMessages();
     const text = messages.map((message) => message.text).join("\n\n");
     const estimate = estimateTokens(text, { messageCount: messages.length });
-    const mediaEstimate = await estimateVisibleMedia(contextWindowValue);
+    const mediaEstimate = await estimateVisibleMediaSafely(contextWindowValue);
     const selectedContextWindow = sanitizeContextWindow(contextWindowValue);
-    const estimatedVisibleTokens = estimate.tokens + mediaEstimate.totalTokens;
+    const estimatedVisibleTokens = estimate.tokens + Number(mediaEstimate.totalTokens || 0);
     const percentage = selectedContextWindow > 0 ? (estimatedVisibleTokens / selectedContextWindow) * 100 : 0;
 
     state.lastEstimate = {
@@ -1218,6 +1220,8 @@
       pdfImageTokens: mediaEstimate.pdfImageTokens,
       pdfImagePages: mediaEstimate.pdfImagePages,
       pdfScannedLikePages: mediaEstimate.pdfScannedLikePages,
+      mediaTimedOut: mediaEstimate.mediaTimedOut,
+      mediaError: mediaEstimate.mediaError,
       characters: text.length,
       messages: messages.length,
       selectedContextWindow,
@@ -1243,6 +1247,50 @@
 
     logMessage(`Estimated ${formatNumber(estimatedVisibleTokens)} loaded-page tokens across ${messages.length} messages.`);
     return state.lastEstimate;
+  }
+
+  async function estimateVisibleMediaSafely(contextWindowValue) {
+    try {
+      return await withTimeout(
+        estimateVisibleMedia(contextWindowValue),
+        MEDIA_ESTIMATE_TIMEOUT_MS,
+        createEmptyMediaEstimate({ mediaTimedOut: true })
+      );
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      logMessage(`Media estimate failed: ${message}`);
+      return createEmptyMediaEstimate({ mediaError: message });
+    }
+  }
+
+  function createEmptyMediaEstimate(overrides = {}) {
+    return Object.assign({
+      imageCount: 0,
+      imageTokens: 0,
+      pdfCount: 0,
+      analyzedPdfCount: 0,
+      inaccessiblePdfCount: 0,
+      pdfPages: 0,
+      pdfTextTokens: 0,
+      pdfImageTokens: 0,
+      pdfImagePages: 0,
+      pdfScannedLikePages: 0,
+      totalTokens: 0,
+      mediaTimedOut: false,
+      mediaError: ""
+    }, overrides);
+  }
+
+  function withTimeout(promise, timeoutMs, fallback) {
+    let timer = 0;
+    return Promise.race([
+      promise,
+      new Promise((resolve) => {
+        timer = window.setTimeout(() => resolve(fallback), timeoutMs);
+      })
+    ]).finally(() => {
+      window.clearTimeout(timer);
+    });
   }
 
   function sanitizeContextWindow(value) {
@@ -1272,7 +1320,9 @@
       pdfImageTokens: pdfEstimate.pdfImageTokens,
       pdfImagePages: pdfEstimate.pdfImagePages,
       pdfScannedLikePages: pdfEstimate.pdfScannedLikePages,
-      totalTokens: imageTokens + pdfEstimate.pdfTextTokens + pdfEstimate.pdfImageTokens
+      totalTokens: imageTokens + pdfEstimate.pdfTextTokens + pdfEstimate.pdfImageTokens,
+      mediaTimedOut: false,
+      mediaError: ""
     };
   }
 
@@ -1436,7 +1486,7 @@
 
   async function fetchPdfArrayBuffer(url) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    const timeout = window.setTimeout(() => controller.abort(), PDF_FETCH_TIMEOUT_MS);
 
     try {
       const response = await fetch(url, {
