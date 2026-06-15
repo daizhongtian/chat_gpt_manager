@@ -317,8 +317,7 @@
     document.getElementById("test-select").addEventListener("click", async () => {
       const api = await getApi();
       api.activateConversationTools();
-      api.showConversationSelectionDialog();
-      showStatus("Selection dialog opened");
+      showStatus("Sidebar checkboxes enabled");
     });
 
     document.getElementById("test-clear").addEventListener("click", async () => {

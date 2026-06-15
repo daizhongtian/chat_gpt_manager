@@ -1,5 +1,4 @@
 #ccm-confirm-modal,
-#ccm-select-modal,
 #ccm-toast {
   color-scheme: light dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -17,8 +16,7 @@
   cursor: pointer;
 }
 
-#ccm-confirm-modal,
-#ccm-select-modal {
+#ccm-confirm-modal {
   position: fixed;
   inset: 0;
   z-index: 2147483647;
@@ -51,8 +49,7 @@
   color: #555555;
 }
 
-.ccm-modal-list,
-.ccm-selection-list {
+.ccm-modal-list {
   max-height: 260px;
   overflow: auto;
   border: 1px solid rgba(20, 20, 20, 0.12);
@@ -68,31 +65,6 @@
 
 .ccm-modal-list li + li {
   margin-top: 6px;
-}
-
-.ccm-selection-count {
-  margin-bottom: 8px;
-  color: #555555;
-  font-variant-numeric: tabular-nums;
-}
-
-.ccm-selection-list {
-  display: grid;
-  gap: 8px;
-}
-
-.ccm-selection-item {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: start;
-  gap: 8px;
-  min-height: 24px;
-  cursor: pointer;
-}
-
-.ccm-selection-item input {
-  margin-top: 2px;
-  accent-color: #10a37f;
 }
 
 .ccm-confirm-label {
@@ -128,8 +100,7 @@
   flex: 1 1 auto;
 }
 
-#ccm-confirm-modal button,
-#ccm-select-modal button {
+#ccm-confirm-modal button {
   min-height: 32px;
   border: 1px solid rgba(20, 20, 20, 0.14);
   border-radius: 6px;
@@ -140,13 +111,11 @@
   padding: 0 12px;
 }
 
-#ccm-confirm-modal button:hover,
-#ccm-select-modal button:hover {
+#ccm-confirm-modal button:hover {
   background: #ececec;
 }
 
-#ccm-confirm-modal button:disabled,
-#ccm-select-modal button:disabled {
+#ccm-confirm-modal button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -183,13 +152,11 @@
     color: #f3f3f3;
   }
 
-  .ccm-modal-card p,
-  .ccm-selection-count {
+  .ccm-modal-card p {
     color: #c4c4c4;
   }
 
-  .ccm-modal-list,
-  .ccm-selection-list {
+  .ccm-modal-list {
     border-color: rgba(255, 255, 255, 0.14);
     background: #2a2a2a;
   }
@@ -200,15 +167,13 @@
     color: #ffffff;
   }
 
-  #ccm-confirm-modal button,
-  #ccm-select-modal button {
+  #ccm-confirm-modal button {
     border-color: rgba(255, 255, 255, 0.14);
     background: #2f2f2f;
     color: #f3f3f3;
   }
 
-  #ccm-confirm-modal button:hover,
-  #ccm-select-modal button:hover {
+  #ccm-confirm-modal button:hover {
     background: #3a3a3a;
   }
 

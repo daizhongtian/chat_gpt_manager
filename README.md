@@ -24,10 +24,9 @@ The extension is opened from the Chrome extension icon. It does not show a perma
 ### Select conversations
 
 1. Click **Select conversations** in the extension popup.
-2. A selection dialog opens on the ChatGPT page.
+2. Checkboxes appear next to the visible conversations in the ChatGPT sidebar.
 3. No conversation is selected automatically.
-4. Choose the conversations you want, or explicitly click **Select all visible** in the dialog.
-5. Click **Apply selection**.
+4. Tick the conversations you want directly in the sidebar.
 
 The extension injects checkboxes into visible sidebar conversations only after you activate selection from the popup.
 
@@ -83,8 +82,8 @@ Usage counts start after the extension is installed and loaded. The extension ca
 
 - `manifest.json` declares the Manifest V3 extension, popup, and ChatGPT content script match.
 - `popup.html`, `popup.css`, and `popup.js` provide the Chrome extension popup controls.
-- `content.js` handles sidebar checkboxes, selection dialogs, deletion flow, MutationObserver refresh, local context estimation, and local usage counting.
-- `styles.css` styles only the temporary page-side checkbox, dialogs, and progress toast.
+- `content.js` handles sidebar checkboxes, deletion flow, MutationObserver refresh, local context estimation, and local usage counting.
+- `styles.css` styles only the temporary page-side checkbox, confirmation dialog, and progress toast.
 - `tests/smoke.html` is a local manual smoke-test page that mimics enough of ChatGPT's DOM to test the extension script safely.
 
 ## Optional local smoke test

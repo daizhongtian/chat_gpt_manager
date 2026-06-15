@@ -2,7 +2,6 @@
   "use strict";
 
   const CONFIRM_MODAL_ID = "ccm-confirm-modal";
-  const SELECT_MODAL_ID = "ccm-select-modal";
   const TOAST_ID = "ccm-toast";
   const CHECKBOX_CLASS = "ccm-conversation-checkbox";
   const ENHANCED_ATTR = "data-ccm-enhanced";
@@ -62,9 +61,9 @@
 
       case "CCM_SELECT_CONVERSATIONS":
         activateConversationTools();
-        showConversationSelectionDialog();
+        showToast("Conversation checkboxes are ready in the sidebar.");
         return ok({
-          message: "Selection dialog opened on the ChatGPT page.",
+          message: "Conversation checkboxes are ready in the sidebar.",
           status: getStatus()
         });
 
@@ -637,7 +636,7 @@
   }
 
   function isInsideExtensionUi(element) {
-    return Boolean(element.closest(`#${CONFIRM_MODAL_ID}, #${SELECT_MODAL_ID}, #${TOAST_ID}`));
+    return Boolean(element.closest(`#${CONFIRM_MODAL_ID}, #${TOAST_ID}`));
   }
 
   function setConversationSelected(key, isSelected) {
@@ -661,111 +660,6 @@
     state.selectedConversationKeys.clear();
     document.querySelectorAll(`.${CHECKBOX_CLASS}`).forEach((checkbox) => {
       checkbox.checked = false;
-    });
-  }
-
-  function showConversationSelectionDialog() {
-    const conversations = getConversationLinks().map((link) => ({
-      key: getConversationKey(link),
-      title: getConversationTitle(link),
-      selected: state.selectedConversationKeys.has(getConversationKey(link))
-    }));
-
-    if (!conversations.length) {
-      logMessage("No visible conversations found.");
-      showToast("No visible conversations found.");
-      return;
-    }
-
-    const oldModal = byId(SELECT_MODAL_ID);
-    if (oldModal) {
-      oldModal.remove();
-    }
-
-    const modal = document.createElement("div");
-    modal.id = SELECT_MODAL_ID;
-    modal.setAttribute("role", "dialog");
-    modal.setAttribute("aria-modal", "true");
-    modal.setAttribute("aria-label", "Select conversations");
-    modal.innerHTML = `
-      <div class="ccm-modal-card">
-        <h2>Select conversations</h2>
-        <p>Choose the visible conversations to mark for deletion. Nothing is selected automatically.</p>
-        <div class="ccm-selection-count" id="ccm-selection-count"></div>
-        <div class="ccm-selection-list" id="ccm-selection-list" tabindex="0"></div>
-        <div class="ccm-modal-actions ccm-modal-actions-spread">
-          <button type="button" id="ccm-selection-clear">Clear</button>
-          <button type="button" id="ccm-selection-all">Select all visible</button>
-          <span class="ccm-modal-spacer"></span>
-          <button type="button" id="ccm-selection-cancel">Cancel</button>
-          <button type="button" id="ccm-selection-apply">Apply selection</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    const list = byId("ccm-selection-list");
-    conversations.forEach((conversation, index) => {
-      const label = document.createElement("label");
-      label.className = "ccm-selection-item";
-
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.dataset.index = String(index);
-      checkbox.checked = conversation.selected;
-
-      const title = document.createElement("span");
-      title.textContent = conversation.title;
-
-      label.append(checkbox, title);
-      list.appendChild(label);
-    });
-
-    const updateDialogCount = () => {
-      const selectedCount = list.querySelectorAll("input[type='checkbox']:checked").length;
-      byId("ccm-selection-count").textContent =
-        `${selectedCount} selected / ${conversations.length} visible conversations`;
-    };
-
-    list.addEventListener("change", updateDialogCount);
-    updateDialogCount();
-
-    byId("ccm-selection-clear").addEventListener("click", () => {
-      list.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
-        checkbox.checked = false;
-      });
-      updateDialogCount();
-    });
-
-    byId("ccm-selection-all").addEventListener("click", () => {
-      list.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
-        checkbox.checked = true;
-      });
-      updateDialogCount();
-    });
-
-    byId("ccm-selection-cancel").addEventListener("click", () => {
-      modal.remove();
-    });
-
-    byId("ccm-selection-apply").addEventListener("click", () => {
-      state.selectedConversationKeys.clear();
-      list.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
-        if (!checkbox.checked) {
-          return;
-        }
-
-        const conversation = conversations[Number(checkbox.dataset.index)];
-        if (conversation) {
-          state.selectedConversationKeys.add(conversation.key);
-        }
-      });
-
-      modal.remove();
-      syncSidebarSelection();
-      logMessage(`Applied selection: ${state.selectedConversationKeys.size} conversations.`);
-      showToast(`${state.selectedConversationKeys.size} conversations selected.`);
     });
   }
 
@@ -1304,7 +1198,6 @@
     globalThis.ChatGPTCleanerContextMeter = {
       activateConversationTools,
       refreshConversationCheckboxes,
-      showConversationSelectionDialog,
       deselectAllConversations,
       deleteSelectedConversations,
       estimateVisibleContext,
