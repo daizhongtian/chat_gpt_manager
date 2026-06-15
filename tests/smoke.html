@@ -351,7 +351,7 @@
     document.getElementById("test-delete").addEventListener("click", async () => {
       const api = await getApi();
       api.deleteSelectedConversations();
-      showStatus("Confirm deletion on page");
+      showStatus("Deletion started");
     });
 
     document.getElementById("test-refresh").addEventListener("click", async () => {

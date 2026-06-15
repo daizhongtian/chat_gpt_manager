@@ -34,9 +34,7 @@ The extension injects checkboxes into visible sidebar conversations only after y
 
 1. Select conversations first.
 2. Click **Delete selected** in the extension popup.
-3. Review the number and titles of conversations.
-4. Type `DELETE`.
-5. The extension opens each conversation's normal menu, clicks **Delete**, confirms deletion, waits briefly, and continues one at a time.
+3. The extension immediately opens each conversation's normal menu, clicks **Delete**, confirms deletion, waits briefly, and continues one at a time.
 
 If one deletion fails, the extension logs the failure in the browser console and continues with the next selected conversation.
 

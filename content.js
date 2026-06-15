@@ -1,7 +1,6 @@
 (function () {
   "use strict";
 
-  const CONFIRM_MODAL_ID = "ccm-confirm-modal";
   const TOAST_ID = "ccm-toast";
   const CHECKBOX_CLASS = "ccm-conversation-checkbox";
   const ENHANCED_ATTR = "data-ccm-enhanced";
@@ -83,11 +82,10 @@
 
       case "CCM_DELETE_SELECTED":
         activateConversationTools();
-        // Let the page-side confirmation and progress continue even if the
-        // extension popup closes while the user types DELETE.
+        // Let the page-side progress continue even if the extension popup closes.
         deleteSelectedConversations();
         return ok({
-          message: "Confirm deletion on the ChatGPT page.",
+          message: "Deletion started.",
           status: getStatus()
         });
 
@@ -815,7 +813,7 @@
   }
 
   function isInsideExtensionUi(element) {
-    return Boolean(element.closest(`#${CONFIRM_MODAL_ID}, #${TOAST_ID}`));
+    return Boolean(element.closest(`#${TOAST_ID}`));
   }
 
   function setConversationSelected(key, isSelected) {
@@ -868,13 +866,6 @@
     if (!conversations.length) {
       logMessage("No conversations selected.");
       showToast("No conversations selected.");
-      return;
-    }
-
-    const confirmed = await showDeleteConfirmation(conversations);
-    if (!confirmed) {
-      logMessage("Deletion cancelled.");
-      showToast("Deletion cancelled.");
       return;
     }
 
@@ -1120,66 +1111,6 @@
 
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
-  }
-
-  function showDeleteConfirmation(conversations) {
-    return new Promise((resolve) => {
-      const oldModal = byId(CONFIRM_MODAL_ID);
-      if (oldModal) {
-        oldModal.remove();
-      }
-
-      const modal = document.createElement("div");
-      modal.id = CONFIRM_MODAL_ID;
-      modal.setAttribute("role", "dialog");
-      modal.setAttribute("aria-modal", "true");
-      modal.setAttribute("aria-label", "Confirm batch deletion");
-      modal.innerHTML = `
-        <div class="ccm-modal-card">
-          <h2>Delete ${conversations.length} conversations?</h2>
-          <p>This uses ChatGPT's normal delete menu one conversation at a time.</p>
-          <div class="ccm-modal-list" tabindex="0">
-            <ol>
-              ${conversations.map((conversation) => `<li>${escapeHtml(conversation.title)}</li>`).join("")}
-            </ol>
-          </div>
-          <label class="ccm-confirm-label" for="ccm-confirm-input">Type DELETE to continue</label>
-          <input id="ccm-confirm-input" type="text" autocomplete="off" spellcheck="false" />
-          <div class="ccm-modal-actions">
-            <button type="button" id="ccm-cancel-delete">Cancel</button>
-            <button type="button" id="ccm-confirm-delete" class="ccm-danger" disabled>Delete selected</button>
-          </div>
-        </div>
-      `;
-
-      document.body.appendChild(modal);
-
-      const input = byId("ccm-confirm-input");
-      const confirm = byId("ccm-confirm-delete");
-      const cancel = byId("ccm-cancel-delete");
-
-      input.addEventListener("input", () => {
-        confirm.disabled = input.value !== "DELETE";
-      });
-
-      cancel.addEventListener("click", () => {
-        modal.remove();
-        resolve(false);
-      });
-
-      confirm.addEventListener("click", () => {
-        modal.remove();
-        resolve(true);
-      });
-
-      input.focus();
-    });
-  }
-
-  function escapeHtml(text) {
-    const span = document.createElement("span");
-    span.textContent = text;
-    return span.innerHTML;
   }
 
   function setProgress(message) {
