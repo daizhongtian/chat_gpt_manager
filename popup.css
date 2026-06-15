@@ -147,6 +147,77 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.estimate-panel {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e2e2e2;
+  border-radius: 6px;
+  background: #fafafa;
+  padding: 8px;
+}
+
+.estimate-panel h3 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.estimate-panel > strong {
+  font-size: 14px;
+}
+
+.estimate-panel span,
+.attachment-item span {
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.attachment-list {
+  display: grid;
+  gap: 7px;
+}
+
+.attachment-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #e7e7e7;
+  padding-top: 7px;
+}
+
+.attachment-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.attachment-item div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.attachment-item strong,
+.attachment-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-item b {
+  max-width: 84px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.small-button {
+  min-height: 28px;
+  max-width: 92px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
 .meter {
   height: 8px;
   overflow: hidden;
@@ -236,6 +307,20 @@ button:disabled {
 
   .meter {
     background: #454545;
+  }
+
+  .estimate-panel {
+    border-color: #3a3a3a;
+    background: #262626;
+  }
+
+  .estimate-panel span,
+  .attachment-item span {
+    color: #b9b9b9;
+  }
+
+  .attachment-item {
+    border-color: #3a3a3a;
   }
 
   .usage-category-row {

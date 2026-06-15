@@ -59,6 +59,8 @@ Usage percentage is calculated as `estimatedVisibleTokens / selectedContextWindo
 
 When context estimation is enabled, the extension also looks for loaded images and visible PDF attachments. Images are estimated locally from rendered dimensions. PDFs are analyzed locally with bundled `pdf.js` only when the browser can access the PDF bytes. The scanner tries ordinary links, attachment-card metadata, embedded `object`/`embed`/`iframe` sources, `blob:` URLs, `data:application/pdf` URLs, ChatGPT same-origin URLs, and OpenAI file CDN URLs. If ChatGPT shows a PDF chip but exposes only a filename or file ID without readable bytes, the extension reports the PDF as detected but inaccessible instead of guessing hidden backend tokens.
 
+If a detected PDF is missing because the browser cannot access its bytes, the popup shows it under **Missing attachments** with an **Add local PDF** button. Selecting the matching local PDF analyzes that file in the browser, moves the item into **Counted attachments**, and updates the visible token total. The selected local PDF is not uploaded anywhere.
+
 ### Usage Counter
 
 The popup includes a **Usage Counter** section.
@@ -78,6 +80,7 @@ Usage counts start after the extension is installed and loaded. The extension ca
 - The estimate only reads message content currently loaded in the ChatGPT page.
 - It cannot see hidden system prompts, memory, tools, uploaded file content, file parsing results, backend-compressed context, or any other model-side context that is not visible in the page.
 - PDF analysis only works when the browser extension can access the actual PDF bytes from the page, a `blob:`/`data:` URL, a ChatGPT same-origin URL, or an OpenAI file CDN URL. It cannot read PDF bytes that exist only inside ChatGPT's backend state.
+- Local PDF replacement only works when the user selects the matching file from their computer.
 - It cannot know the real backend model context window; the percentage uses the context window you choose in the popup.
 - Usage counting depends on visible ChatGPT UI labels and send controls. If ChatGPT changes its model picker or composer, automatic counting may miss or mislabel some sends.
 - Usage counting is not an official OpenAI quota meter. It cannot verify billing, subscription limits, backend model routing, retries, or messages sent from other browsers/devices.

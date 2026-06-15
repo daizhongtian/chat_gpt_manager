@@ -3,7 +3,11 @@
 
   const USAGE_STORAGE_KEY = "ccmUsageStats";
   const SETTINGS_STORAGE_KEY = "ccmSettings";
+  const LOCAL_PDF_LIMIT_BYTES = 20 * 1024 * 1024;
   const elements = {};
+  let activeEstimate = null;
+  let localPdfEstimates = [];
+  let pendingMissingAttachment = null;
 
   document.addEventListener("DOMContentLoaded", () => {
     cacheElements();
@@ -23,6 +27,7 @@
     elements.contextWindow = byId("context-window");
     elements.status = byId("conversation-status");
     elements.estimateOutput = byId("estimate-output");
+    elements.localPdfInput = byId("local-pdf-input");
     elements.currentModel = byId("current-model");
     elements.refreshUsage = byId("refresh-usage");
     elements.resetUsage = byId("reset-usage");
@@ -35,6 +40,8 @@
     elements.deleteSelected.addEventListener("click", () => runAction("CCM_DELETE_SELECTED"));
     elements.refresh.addEventListener("click", () => runAction("CCM_REFRESH_LIST"));
     elements.estimate.addEventListener("click", estimateContext);
+    elements.estimateOutput.addEventListener("click", handleEstimateOutputClick);
+    elements.localPdfInput.addEventListener("change", handleLocalPdfSelection);
     elements.contextEstimateEnabled.addEventListener("change", saveContextEstimateSetting);
     elements.refreshUsage.addEventListener("click", refreshUsageStats);
     elements.resetUsage.addEventListener("click", resetUsageStats);
@@ -91,8 +98,11 @@
         type: "CCM_ESTIMATE_CONTEXT",
         contextWindow: selectedContextWindow
       });
+      activeEstimate = response.estimate;
+      localPdfEstimates = [];
+      pendingMissingAttachment = null;
       renderStatus(response.status);
-      renderEstimate(response.estimate);
+      renderEstimate(activeEstimate);
     } catch (error) {
       elements.estimateOutput.innerHTML = `<div class="warning">${escapeHtml(error.message)}</div>`;
       setStatus(error.message);
@@ -116,6 +126,116 @@
     } catch (error) {
       // Local file smoke tests do not provide chrome.storage.
     }
+  }
+
+  function handleEstimateOutputClick(event) {
+    const button = event.target.closest("[data-action='add-local-pdf']");
+    if (!button) {
+      return;
+    }
+
+    pendingMissingAttachment = {
+      key: button.getAttribute("data-attachment-key") || "",
+      name: button.getAttribute("data-attachment-name") || ""
+    };
+    elements.localPdfInput.value = "";
+    elements.localPdfInput.click();
+  }
+
+  async function handleLocalPdfSelection(event) {
+    const files = Array.from(event.target.files || []).filter(Boolean);
+    if (!files.length) {
+      return;
+    }
+
+    if (!activeEstimate) {
+      elements.estimateOutput.innerHTML = '<div class="warning">Run Estimate Context before adding a local PDF.</div>';
+      return;
+    }
+
+    const analyzer = globalThis.ChatGPTCleanerPdfAnalyzer;
+    if (!analyzer || typeof analyzer.analyzeFile !== "function") {
+      elements.estimateOutput.insertAdjacentHTML("afterbegin", '<div class="warning">Local PDF analyzer is not available in this popup.</div>');
+      return;
+    }
+
+    setBusy(true);
+    const added = [];
+    const failures = [];
+    const oneFilePendingMatch = files.length === 1 ? pendingMissingAttachment : null;
+
+    try {
+      for (const file of files) {
+        try {
+          const localAttachment = await analyzeLocalPdfFile(file, oneFilePendingMatch);
+          addOrReplaceLocalPdfEstimate(localAttachment);
+          added.push(localAttachment);
+        } catch (error) {
+          failures.push(`${file.name}: ${error.message}`);
+        }
+      }
+
+      renderEstimate(activeEstimate);
+      if (added.length) {
+        setStatus(`Added ${formatNumber(added.length)} local PDF estimate${added.length === 1 ? "" : "s"}.`);
+      }
+      if (failures.length) {
+        elements.estimateOutput.insertAdjacentHTML("afterbegin", `<div class="warning">${escapeHtml(failures.join(" "))}</div>`);
+      }
+    } finally {
+      setBusy(false);
+      pendingMissingAttachment = null;
+      elements.localPdfInput.value = "";
+    }
+  }
+
+  async function analyzeLocalPdfFile(file, matchedMissing) {
+    if (!/\.pdf$/i.test(file.name || "") && file.type !== "application/pdf") {
+      throw new Error("Choose a PDF file.");
+    }
+
+    if (file.size > LOCAL_PDF_LIMIT_BYTES) {
+      throw new Error("PDF is larger than the 20 MB local-analysis limit.");
+    }
+
+    const selectedContextWindow = Number(activeEstimate.selectedContextWindow || activeEstimate.contextWindow || elements.contextWindow.value || 128000);
+    const result = await globalThis.ChatGPTCleanerPdfAnalyzer.analyzeFile(file, {
+      contextWindow: selectedContextWindow
+    });
+    const textTokens = Number(result.textTokens || 0);
+    const imageTokens = Number(result.estimatedImageTokens || 0);
+
+    return {
+      kind: "pdf",
+      key: `local:${Date.now()}:${file.name}`,
+      matchedMissingKey: matchedMissing && matchedMissing.key ? matchedMissing.key : findMissingAttachmentKeyByName(file.name),
+      name: matchedMissing && matchedMissing.name ? matchedMissing.name : (result.fileName || file.name || "Local PDF"),
+      source: "Local PDF upload",
+      status: "Counted",
+      tokens: textTokens + imageTokens,
+      textTokens,
+      imageTokens,
+      pages: Number(result.pages || 0),
+      imagePages: Number(result.imagePages || 0),
+      scannedLikePages: Number(result.scannedLikePages || 0)
+    };
+  }
+
+  function addOrReplaceLocalPdfEstimate(localAttachment) {
+    localPdfEstimates = localPdfEstimates.filter((existing) => {
+      if (localAttachment.matchedMissingKey && existing.matchedMissingKey === localAttachment.matchedMissingKey) {
+        return false;
+      }
+
+      return normalizeFileName(existing.name) !== normalizeFileName(localAttachment.name);
+    });
+    localPdfEstimates.push(localAttachment);
+  }
+
+  function findMissingAttachmentKeyByName(name) {
+    const missing = normalizeAttachmentList(activeEstimate && activeEstimate.missingAttachments);
+    const match = missing.find((attachment) => normalizeFileName(attachment.name) === normalizeFileName(name));
+    return match ? match.key || "" : "";
   }
 
   async function refreshUsageStats() {
@@ -186,17 +306,18 @@
       return;
     }
 
-    const percentage = Math.max(0, estimate.percentage || 0);
-    const estimatedVisibleTokens = Number(estimate.estimatedVisibleTokens || estimate.tokens || 0);
-    const selectedContextWindow = Number(estimate.selectedContextWindow || estimate.contextWindow || 128000);
-    const methodLabel = formatEstimatorMethod(estimate);
-    const mediaRows = renderMediaRows(estimate);
+    activeEstimate = estimate;
+    const adjustedEstimate = applyLocalPdfEstimates(estimate);
+    const percentage = Math.max(0, adjustedEstimate.percentage || 0);
+    const estimatedVisibleTokens = Number(adjustedEstimate.estimatedVisibleTokens || adjustedEstimate.tokens || 0);
+    const selectedContextWindow = Number(adjustedEstimate.selectedContextWindow || adjustedEstimate.contextWindow || 128000);
+    const methodLabel = formatEstimatorMethod(adjustedEstimate);
     elements.estimateOutput.innerHTML = `
       <div class="metric"><span>Estimated visible tokens</span><strong>${formatNumber(estimatedVisibleTokens)}</strong></div>
-      <div class="metric"><span>Text tokens</span><strong>${formatNumber(estimate.textTokens || estimatedVisibleTokens)}</strong></div>
-      <div class="metric"><span>Characters</span><strong>${formatNumber(estimate.characters)}</strong></div>
-      <div class="metric"><span>Messages</span><strong>${formatNumber(estimate.messages)}</strong></div>
-      ${mediaRows}
+      ${renderVisibleTextBlock(adjustedEstimate)}
+      ${renderCountedAttachments(adjustedEstimate.countedAttachments)}
+      ${renderMissingAttachments(adjustedEstimate.missingAttachments)}
+      ${renderEstimateWarnings(adjustedEstimate)}
       <div class="metric"><span>Estimator</span><strong>${escapeHtml(methodLabel)}</strong></div>
       <div class="meter" aria-label="Approximate loaded-page context usage">
         <div class="meter-fill" style="width: ${Math.min(percentage, 100).toFixed(2)}%"></div>
@@ -205,7 +326,84 @@
     `;
   }
 
-  function renderMediaRows(estimate) {
+  function renderVisibleTextBlock(estimate) {
+    return `
+      <div class="estimate-panel">
+        <h3>Visible conversation text</h3>
+        <strong>${formatNumber(estimate.textTokens || 0)} estimated tokens</strong>
+        <span>${formatNumber(estimate.characters)} characters | ${formatNumber(estimate.messages)} messages</span>
+      </div>
+    `;
+  }
+
+  function renderCountedAttachments(attachments) {
+    const items = normalizeAttachmentList(attachments);
+    if (!items.length) {
+      return "";
+    }
+
+    return `
+      <div class="estimate-panel">
+        <h3>Counted attachments</h3>
+        <div class="attachment-list">
+          ${items.map((attachment) => `
+            <div class="attachment-item counted-attachment">
+              <div>
+                <strong>${escapeHtml(attachment.name || "Attachment")}</strong>
+                <span>Source: ${escapeHtml(attachment.source || "Visible page attachment")}</span>
+                ${renderAttachmentDetails(attachment)}
+              </div>
+              <b>${formatNumber(attachment.tokens)} estimated tokens</b>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderMissingAttachments(attachments) {
+    const items = normalizeAttachmentList(attachments);
+    if (!items.length) {
+      return "";
+    }
+
+    return `
+      <div class="estimate-panel">
+        <h3>Missing attachments</h3>
+        <div class="attachment-list">
+          ${items.map((attachment) => `
+            <div class="attachment-item missing-attachment">
+              <div>
+                <strong>${escapeHtml(attachment.name || "PDF file")}</strong>
+                <span>Status: ${escapeHtml(attachment.status || "Not counted")}</span>
+                <span>Reason: ${escapeHtml(attachment.reason || "File content is not available to the browser.")}</span>
+              </div>
+              <button type="button" class="small-button" data-action="add-local-pdf" data-attachment-key="${escapeAttribute(attachment.key || "")}" data-attachment-name="${escapeAttribute(attachment.name || "")}">Add local PDF</button>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderAttachmentDetails(attachment) {
+    const details = [];
+    if (attachment.kind === "pdf") {
+      details.push(`${formatNumber(attachment.textTokens || 0)} text tokens`);
+      if (Number(attachment.imageTokens || 0) > 0) {
+        details.push(`${formatNumber(attachment.imageTokens)} image tokens`);
+      }
+      if (Number(attachment.pages || 0) > 0) {
+        details.push(`${formatNumber(attachment.pages)} pages`);
+      }
+    } else if (attachment.kind === "image" && attachment.width && attachment.height) {
+      details.push(`${formatNumber(attachment.width)} x ${formatNumber(attachment.height)}`);
+    }
+
+    return details.length ? `<span>${escapeHtml(details.join(" | "))}</span>` : "";
+  }
+
+  function renderEstimateWarnings(estimate) {
     const rows = [];
     if (estimate.mediaTimedOut) {
       rows.push('<div class="warning">Media/PDF analysis timed out; showing the visible text estimate first.</div>');
@@ -215,20 +413,47 @@
       rows.push(`<div class="warning">Media/PDF analysis failed: ${escapeHtml(estimate.mediaError)}</div>`);
     }
 
-    if (Number(estimate.imageCount || 0) > 0) {
-      rows.push(`<div class="metric"><span>Images</span><strong>${formatNumber(estimate.imageCount)} / ${formatNumber(estimate.imageTokens)} tokens</strong></div>`);
-    }
-
-    if (Number(estimate.pdfCount || 0) > 0) {
-      rows.push(`<div class="metric"><span>PDFs</span><strong>${formatNumber(estimate.analyzedPdfCount || 0)} analyzed / ${formatNumber(estimate.pdfCount)} found</strong></div>`);
-      rows.push(`<div class="metric"><span>PDF text</span><strong>${formatNumber(estimate.pdfTextTokens || 0)} tokens</strong></div>`);
-      rows.push(`<div class="metric"><span>PDF image pages</span><strong>${formatNumber(estimate.pdfImagePages || 0)} / ${formatNumber(estimate.pdfImageTokens || 0)} tokens</strong></div>`);
-      if (Number(estimate.inaccessiblePdfCount || 0) > 0) {
-        rows.push(`<div class="warning">${formatNumber(estimate.inaccessiblePdfCount)} PDF attachment(s) detected, but no readable PDF bytes were exposed as a DOM, blob, data, same-origin, or OpenAI file URL.</div>`);
-      }
-    }
-
     return rows.join("");
+  }
+
+  function applyLocalPdfEstimates(estimate) {
+    const countedAttachments = normalizeAttachmentList(estimate.countedAttachments);
+    let missingAttachments = normalizeAttachmentList(estimate.missingAttachments);
+
+    localPdfEstimates.forEach((localAttachment) => {
+      missingAttachments = missingAttachments.filter((missing) => !attachmentMatchesLocalPdf(missing, localAttachment));
+      countedAttachments.push(localAttachment);
+    });
+
+    const attachmentTokens = countedAttachments.reduce((total, attachment) => total + Number(attachment.tokens || 0), 0);
+    const textTokens = Number(estimate.textTokens || 0);
+    const selectedContextWindow = Number(estimate.selectedContextWindow || estimate.contextWindow || 128000);
+    const estimatedVisibleTokens = textTokens + attachmentTokens;
+
+    return Object.assign({}, estimate, {
+      countedAttachments,
+      missingAttachments,
+      countedAttachmentTokens: attachmentTokens,
+      estimatedVisibleTokens,
+      tokens: estimatedVisibleTokens,
+      percentage: selectedContextWindow > 0 ? (estimatedVisibleTokens / selectedContextWindow) * 100 : 0
+    });
+  }
+
+  function normalizeAttachmentList(attachments) {
+    return Array.isArray(attachments) ? attachments.filter((attachment) => attachment && typeof attachment === "object") : [];
+  }
+
+  function attachmentMatchesLocalPdf(missing, localAttachment) {
+    if (localAttachment.matchedMissingKey && missing.key === localAttachment.matchedMissingKey) {
+      return true;
+    }
+
+    return normalizeFileName(missing.name) === normalizeFileName(localAttachment.name);
+  }
+
+  function normalizeFileName(name) {
+    return String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
   }
 
   function formatEstimatorMethod(estimate) {
@@ -307,6 +532,7 @@
       elements.deleteSelected,
       elements.refresh,
       elements.contextEstimateEnabled,
+      elements.localPdfInput,
       elements.refreshUsage,
       elements.resetUsage
     ]
@@ -471,5 +697,9 @@
     const span = document.createElement("span");
     span.textContent = text;
     return span.innerHTML;
+  }
+
+  function escapeAttribute(text) {
+    return escapeHtml(text).replace(/"/g, "&quot;");
   }
 })();

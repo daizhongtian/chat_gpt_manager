@@ -41,6 +41,7 @@
         </select>
       </label>
       <button type="button" id="estimate-context" class="wide">Estimate Context</button>
+      <input id="local-pdf-input" class="hidden" type="file" accept="application/pdf,.pdf" multiple />
       <div id="estimate-output" class="estimate-output" aria-live="polite"></div>
     </section>
 
@@ -60,6 +61,8 @@
     <p class="footnote">No data leaves this browser. Estimates and usage counts stay local.</p>
   </main>
 
+  <script src="vendor/chatgpt-cleaner-tokenizer.js"></script>
+  <script src="vendor/chatgpt-cleaner-pdf-analyzer.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

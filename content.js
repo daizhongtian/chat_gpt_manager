@@ -1176,6 +1176,8 @@
       pdfImageTokens: mediaEstimate.pdfImageTokens,
       pdfImagePages: mediaEstimate.pdfImagePages,
       pdfScannedLikePages: mediaEstimate.pdfScannedLikePages,
+      countedAttachments: mediaEstimate.countedAttachments,
+      missingAttachments: mediaEstimate.missingAttachments,
       mediaTimedOut: mediaEstimate.mediaTimedOut,
       mediaError: mediaEstimate.mediaError,
       characters: text.length,
@@ -1231,6 +1233,8 @@
       pdfImageTokens: 0,
       pdfImagePages: 0,
       pdfScannedLikePages: 0,
+      countedAttachments: [],
+      missingAttachments: [],
       totalTokens: 0,
       mediaTimedOut: false,
       mediaError: ""
@@ -1261,7 +1265,10 @@
   async function estimateVisibleMedia(contextWindowValue) {
     const selectedContextWindow = sanitizeContextWindow(contextWindowValue);
     const images = getVisibleContentImages();
-    const imageTokens = sum(images.map((image) => estimateImageTokens(image.width, image.height)));
+    const imageAttachments = images
+      .map((image, index) => createImageAttachmentEstimate(image, index))
+      .filter((attachment) => attachment.tokens > 0);
+    const imageTokens = sum(imageAttachments.map((attachment) => attachment.tokens));
     const pdfs = getVisiblePdfAttachments();
     const pdfEstimate = await estimatePdfAttachments(pdfs, selectedContextWindow);
 
@@ -1276,9 +1283,25 @@
       pdfImageTokens: pdfEstimate.pdfImageTokens,
       pdfImagePages: pdfEstimate.pdfImagePages,
       pdfScannedLikePages: pdfEstimate.pdfScannedLikePages,
+      countedAttachments: imageAttachments.concat(pdfEstimate.countedAttachments),
+      missingAttachments: pdfEstimate.missingAttachments,
       totalTokens: imageTokens + pdfEstimate.pdfTextTokens + pdfEstimate.pdfImageTokens,
       mediaTimedOut: false,
       mediaError: ""
+    };
+  }
+
+  function createImageAttachmentEstimate(image, index) {
+    const tokens = estimateImageTokens(image.width, image.height);
+    return {
+      kind: "image",
+      key: image.key || `visible-image-${index + 1}`,
+      name: image.alt ? `Image: ${image.alt.slice(0, 42)}` : `Visible image ${index + 1}`,
+      source: "Visible page image",
+      status: "Counted",
+      tokens,
+      width: Math.round(Number(image.width || 0)),
+      height: Math.round(Number(image.height || 0))
     };
   }
 
@@ -1625,13 +1648,18 @@
       pdfTextTokens: 0,
       pdfImageTokens: 0,
       pdfImagePages: 0,
-      pdfScannedLikePages: 0
+      pdfScannedLikePages: 0,
+      countedAttachments: [],
+      missingAttachments: []
     };
     const analyzer = globalThis.ChatGPTCleanerPdfAnalyzer;
 
     for (const pdf of pdfs.slice(0, PDF_AUTO_ANALYSIS_LIMIT)) {
       if (!pdf.fetchUrl || !analyzer || typeof analyzer.analyzeArrayBuffer !== "function") {
         summary.inaccessiblePdfCount += 1;
+        summary.missingAttachments.push(createMissingPdfAttachment(pdf, !pdf.fetchUrl
+          ? "File content is not available to the browser."
+          : "Local PDF analyzer is not available."));
         continue;
       }
 
@@ -1648,17 +1676,52 @@
         summary.pdfImageTokens += Number(result.estimatedImageTokens || 0);
         summary.pdfImagePages += Number(result.imagePages || 0);
         summary.pdfScannedLikePages += Number(result.scannedLikePages || 0);
+        summary.countedAttachments.push(createCountedPdfAttachment(pdf, result));
       } catch (error) {
         summary.inaccessiblePdfCount += 1;
+        summary.missingAttachments.push(createMissingPdfAttachment(pdf, error.message || "PDF could not be analyzed."));
         logMessage(`PDF estimate failed for ${pdf.name}: ${error.message}`);
       }
     }
 
     if (pdfs.length > PDF_AUTO_ANALYSIS_LIMIT) {
       summary.inaccessiblePdfCount += pdfs.length - PDF_AUTO_ANALYSIS_LIMIT;
+      pdfs.slice(PDF_AUTO_ANALYSIS_LIMIT).forEach((pdf) => {
+        summary.missingAttachments.push(createMissingPdfAttachment(pdf, "Skipped by the automatic PDF analysis limit."));
+      });
     }
 
     return summary;
+  }
+
+  function createCountedPdfAttachment(pdf, result) {
+    const textTokens = Number(result.textTokens || 0);
+    const imageTokens = Number(result.estimatedImageTokens || 0);
+    return {
+      kind: "pdf",
+      key: pdf.key,
+      name: result.fileName || pdf.name || "PDF file",
+      source: "Browser-accessible PDF",
+      status: "Counted",
+      tokens: textTokens + imageTokens,
+      textTokens,
+      imageTokens,
+      pages: Number(result.pages || 0),
+      imagePages: Number(result.imagePages || 0),
+      scannedLikePages: Number(result.scannedLikePages || 0)
+    };
+  }
+
+  function createMissingPdfAttachment(pdf, reason) {
+    return {
+      kind: "pdf",
+      key: pdf.key,
+      name: pdf.name || "PDF file",
+      source: "Unavailable PDF",
+      status: "Not counted",
+      reason: reason || "File content is not available to the browser.",
+      tokens: 0
+    };
   }
 
   async function fetchPdfArrayBuffer(url) {
