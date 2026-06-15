@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Cleaner & Context Meter",
+  "short_name": "ChatGPT Cleaner",
+  "version": "1.0.0",
+  "description": "Batch delete visible ChatGPT conversations and estimate visible conversation context usage locally.",
+  "minimum_chrome_version": "114",
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChatGPT Cleaner Smoke Test</title>
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f6f7f9;
+      color: #171717;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: 100vh;
+    }
+
+    aside {
+      border-right: 1px solid #ddd;
+      background: #fff;
+      padding: 12px;
+    }
+
+    .conversation-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+
+    .conversation-row a {
+      display: flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 8px;
+      border-radius: 6px;
+      color: #222;
+      text-decoration: none;
+    }
+
+    .conversation-row a:hover {
+      background: #f0f0f0;
+    }
+
+    .menu-button {
+      min-width: 32px;
+      min-height: 32px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    main {
+      max-width: 820px;
+      padding: 40px;
+    }
+
+    article {
+      margin-bottom: 18px;
+      border-radius: 8px;
+      background: #fff;
+      padding: 16px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    }
+
+    [role="menu"] {
+      position: fixed;
+      left: 260px;
+      top: 80px;
+      z-index: 10;
+      display: grid;
+      gap: 4px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      padding: 6px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+    }
+
+    [role="dialog"] {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      z-index: 11;
+      transform: translate(-50%, -50%);
+      display: grid;
+      gap: 10px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      padding: 18px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside aria-label="Chat history sidebar">
+      <h1>Mock ChatGPT</h1>
+      <div class="conversation-row" data-title="Planning notes">
+        <a href="/c/mock-1">Planning notes</a>
+        <button class="menu-button" aria-label="Open conversation options">...</button>
+      </div>
+      <div class="conversation-row" data-title="中文和 English mixed chat">
+        <a href="/c/mock-2">中文和 English mixed chat</a>
+        <button class="menu-button" aria-label="Open conversation options">...</button>
+      </div>
+      <div class="conversation-row" data-title="Research summary">
+        <a href="/c/mock-3">Research summary</a>
+        <button class="menu-button" aria-label="Open conversation options">...</button>
+      </div>
+    </aside>
+
+    <main>
+      <article data-message-author-role="user">Please summarize this product idea and keep the tone practical.</article>
+      <article data-message-author-role="assistant">Here is a concise summary with risks, next steps, and a launch checklist.</article>
+      <article data-message-author-role="user">这是一个混合中文和 English 的消息，用来测试 token 估算。</article>
+    </main>
+  </div>
+
+  <script>
+    document.addEventListener("click", (event) => {
+      const menuButton = event.target.closest(".menu-button");
+      if (menuButton) {
+        document.querySelectorAll("[role='menu']").forEach((menu) => menu.remove());
+        const row = menuButton.closest(".conversation-row");
+        const menu = document.createElement("div");
+        menu.setAttribute("role", "menu");
+        menu.innerHTML = '<button type="button" role="menuitem" data-delete-menu>Delete</button>';
+        menu.querySelector("[data-delete-menu]").addEventListener("click", () => {
+          menu.remove();
+          const dialog = document.createElement("div");
+          dialog.setAttribute("role", "dialog");
+          dialog.setAttribute("aria-modal", "true");
+          dialog.innerHTML = '<strong>Delete chat?</strong><button type="button" data-confirm-delete>Delete</button>';
+          dialog.querySelector("[data-confirm-delete]").addEventListener("click", () => {
+            row.remove();
+            dialog.remove();
+          });
+          document.body.appendChild(dialog);
+        });
+        document.body.appendChild(menu);
+      }
+    });
+  </script>
+  <script src="../content.js"></script>
+</body>
+</html>
