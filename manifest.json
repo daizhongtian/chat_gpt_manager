@@ -22,12 +22,23 @@
       ],
       "js": [
         "vendor/chatgpt-cleaner-tokenizer.js",
+        "vendor/chatgpt-cleaner-pdf-analyzer.js",
         "content.js"
       ],
       "css": [
         "styles.css"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "vendor/chatgpt-cleaner-pdf-analyzer.worker.js"
+      ],
+      "matches": [
+        "https://chatgpt.com/*"
+      ]
     }
   ]
 }

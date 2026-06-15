@@ -100,7 +100,7 @@
 
       case "CCM_ESTIMATE_CONTEXT":
         return ok({
-          estimate: estimateVisibleContext(Number(message.contextWindow)),
+          estimate: await estimateVisibleContext(Number(message.contextWindow)),
           status: getStatus()
         });
 
@@ -1195,16 +1195,29 @@
     state.logs = state.logs.slice(0, 60);
   }
 
-  function estimateVisibleContext(contextWindowValue) {
+  async function estimateVisibleContext(contextWindowValue) {
     const messages = getVisibleMessages();
     const text = messages.map((message) => message.text).join("\n\n");
     const estimate = estimateTokens(text, { messageCount: messages.length });
+    const mediaEstimate = await estimateVisibleMedia(contextWindowValue);
     const selectedContextWindow = sanitizeContextWindow(contextWindowValue);
-    const percentage = selectedContextWindow > 0 ? (estimate.tokens / selectedContextWindow) * 100 : 0;
+    const estimatedVisibleTokens = estimate.tokens + mediaEstimate.totalTokens;
+    const percentage = selectedContextWindow > 0 ? (estimatedVisibleTokens / selectedContextWindow) * 100 : 0;
 
     state.lastEstimate = {
-      estimatedVisibleTokens: estimate.tokens,
-      tokens: estimate.tokens,
+      estimatedVisibleTokens,
+      tokens: estimatedVisibleTokens,
+      textTokens: estimate.tokens,
+      imageTokens: mediaEstimate.imageTokens,
+      imageCount: mediaEstimate.imageCount,
+      pdfCount: mediaEstimate.pdfCount,
+      analyzedPdfCount: mediaEstimate.analyzedPdfCount,
+      inaccessiblePdfCount: mediaEstimate.inaccessiblePdfCount,
+      pdfPages: mediaEstimate.pdfPages,
+      pdfTextTokens: mediaEstimate.pdfTextTokens,
+      pdfImageTokens: mediaEstimate.pdfImageTokens,
+      pdfImagePages: mediaEstimate.pdfImagePages,
+      pdfScannedLikePages: mediaEstimate.pdfScannedLikePages,
       characters: text.length,
       messages: messages.length,
       selectedContextWindow,
@@ -1228,7 +1241,7 @@
       warning: "Loaded page content only. This is not the real model backend context."
     };
 
-    logMessage(`Estimated ${formatNumber(estimate.tokens)} loaded-page tokens across ${messages.length} messages.`);
+    logMessage(`Estimated ${formatNumber(estimatedVisibleTokens)} loaded-page tokens across ${messages.length} messages.`);
     return state.lastEstimate;
   }
 
@@ -1239,6 +1252,215 @@
     }
 
     return numeric;
+  }
+
+  async function estimateVisibleMedia(contextWindowValue) {
+    const selectedContextWindow = sanitizeContextWindow(contextWindowValue);
+    const images = getVisibleContentImages();
+    const imageTokens = sum(images.map((image) => estimateImageTokens(image.width, image.height)));
+    const pdfs = getVisiblePdfAttachments();
+    const pdfEstimate = await estimatePdfAttachments(pdfs, selectedContextWindow);
+
+    return {
+      imageCount: images.length,
+      imageTokens,
+      pdfCount: pdfs.length,
+      analyzedPdfCount: pdfEstimate.analyzedPdfCount,
+      inaccessiblePdfCount: pdfEstimate.inaccessiblePdfCount,
+      pdfPages: pdfEstimate.pdfPages,
+      pdfTextTokens: pdfEstimate.pdfTextTokens,
+      pdfImageTokens: pdfEstimate.pdfImageTokens,
+      pdfImagePages: pdfEstimate.pdfImagePages,
+      pdfScannedLikePages: pdfEstimate.pdfScannedLikePages,
+      totalTokens: imageTokens + pdfEstimate.pdfTextTokens + pdfEstimate.pdfImageTokens
+    };
+  }
+
+  function getVisibleContentImages() {
+    const main = document.querySelector("main") || document.body;
+    const seen = new Set();
+
+    return Array.from(main.querySelectorAll("img"))
+      .filter((image) => !isInsideExtensionUi(image) && isRenderedElement(image))
+      .map((image) => {
+        const rect = image.getBoundingClientRect();
+        const width = Number(image.naturalWidth || rect.width || 0);
+        const height = Number(image.naturalHeight || rect.height || 0);
+        return {
+          key: image.currentSrc || image.src || `${Math.round(width)}x${Math.round(height)}:${image.alt || ""}`,
+          width,
+          height,
+          alt: image.alt || ""
+        };
+      })
+      .filter((image) => image.width >= 96 && image.height >= 96)
+      .filter((image) => {
+        const label = cleanText(image.alt);
+        return !/(avatar|icon|logo|profile)/i.test(label);
+      })
+      .filter((image) => {
+        if (seen.has(image.key)) {
+          return false;
+        }
+        seen.add(image.key);
+        return true;
+      });
+  }
+
+  function estimateImageTokens(width, height) {
+    let scaledWidth = Number(width || 0);
+    let scaledHeight = Number(height || 0);
+    if (!scaledWidth || !scaledHeight) {
+      return 0;
+    }
+
+    const maxSide = Math.max(scaledWidth, scaledHeight);
+    if (maxSide > 2048) {
+      const ratio = 2048 / maxSide;
+      scaledWidth *= ratio;
+      scaledHeight *= ratio;
+    }
+
+    const minSide = Math.min(scaledWidth, scaledHeight);
+    if (minSide > 768) {
+      const ratio = 768 / minSide;
+      scaledWidth *= ratio;
+      scaledHeight *= ratio;
+    }
+
+    const tiles = Math.max(1, Math.ceil(scaledWidth / 512) * Math.ceil(scaledHeight / 512));
+    return 85 + (170 * tiles);
+  }
+
+  function getVisiblePdfAttachments() {
+    const main = document.querySelector("main") || document.body;
+    const candidates = Array.from(main.querySelectorAll("a[href], [aria-label], [title], [data-testid*='file' i], [data-testid*='attachment' i]"));
+    const seen = new Set();
+
+    return candidates
+      .filter((element) => !isInsideExtensionUi(element) && isRenderedElement(element))
+      .map((element) => {
+        const link = element.matches("a[href]") ? element : element.closest("a[href]");
+        const href = link ? link.href : "";
+        const label = cleanText([
+          element.getAttribute("aria-label"),
+          element.getAttribute("title"),
+          element.getAttribute("data-testid"),
+          element.textContent,
+          href
+        ].filter(Boolean).join(" "));
+
+        return {
+          key: href || label,
+          name: extractPdfName(label, href),
+          href,
+          fetchUrl: getFetchablePdfUrl(href)
+        };
+      })
+      .filter((attachment) => /\.pdf(?:$|[?#\s])|pdf document|application\/pdf/i.test(`${attachment.name} ${attachment.href}`))
+      .filter((attachment) => {
+        if (!attachment.key || seen.has(attachment.key)) {
+          return false;
+        }
+        seen.add(attachment.key);
+        return true;
+      });
+  }
+
+  function extractPdfName(label, href) {
+    const source = cleanText(label) || href || "PDF file";
+    const match = source.match(/[^/\\?#\s]+\.pdf/i);
+    return match ? match[0] : "PDF file";
+  }
+
+  function getFetchablePdfUrl(href) {
+    if (!href) {
+      return "";
+    }
+
+    try {
+      const url = new URL(href, location.href);
+      if (url.protocol === "blob:" || url.protocol === "data:" || url.origin === location.origin) {
+        return url.href;
+      }
+    } catch (error) {
+      return "";
+    }
+
+    return "";
+  }
+
+  async function estimatePdfAttachments(pdfs, contextWindow) {
+    const summary = {
+      analyzedPdfCount: 0,
+      inaccessiblePdfCount: 0,
+      pdfPages: 0,
+      pdfTextTokens: 0,
+      pdfImageTokens: 0,
+      pdfImagePages: 0,
+      pdfScannedLikePages: 0
+    };
+    const analyzer = globalThis.ChatGPTCleanerPdfAnalyzer;
+
+    for (const pdf of pdfs.slice(0, 3)) {
+      if (!pdf.fetchUrl || !analyzer || typeof analyzer.analyzeArrayBuffer !== "function") {
+        summary.inaccessiblePdfCount += 1;
+        continue;
+      }
+
+      try {
+        const arrayBuffer = await fetchPdfArrayBuffer(pdf.fetchUrl);
+        const result = await analyzer.analyzeArrayBuffer(arrayBuffer, {
+          fileName: pdf.name,
+          fileSize: arrayBuffer.byteLength,
+          contextWindow
+        });
+        summary.analyzedPdfCount += 1;
+        summary.pdfPages += Number(result.pages || 0);
+        summary.pdfTextTokens += Number(result.textTokens || 0);
+        summary.pdfImageTokens += Number(result.estimatedImageTokens || 0);
+        summary.pdfImagePages += Number(result.imagePages || 0);
+        summary.pdfScannedLikePages += Number(result.scannedLikePages || 0);
+      } catch (error) {
+        summary.inaccessiblePdfCount += 1;
+        logMessage(`PDF estimate failed for ${pdf.name}: ${error.message}`);
+      }
+    }
+
+    if (pdfs.length > 3) {
+      summary.inaccessiblePdfCount += pdfs.length - 3;
+    }
+
+    return summary;
+  }
+
+  async function fetchPdfArrayBuffer(url) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const response = await fetch(url, {
+        credentials: "include",
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error(`PDF fetch failed with ${response.status}`);
+      }
+
+      const length = Number(response.headers.get("content-length") || 0);
+      if (length > 20 * 1024 * 1024) {
+        throw new Error("PDF is larger than the 20 MB auto-analysis limit.");
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength > 20 * 1024 * 1024) {
+        throw new Error("PDF is larger than the 20 MB auto-analysis limit.");
+      }
+
+      return arrayBuffer;
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }
 
   function getVisibleMessages() {

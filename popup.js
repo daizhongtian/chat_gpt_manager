@@ -2,12 +2,13 @@
   "use strict";
 
   const USAGE_STORAGE_KEY = "ccmUsageStats";
+  const SETTINGS_STORAGE_KEY = "ccmSettings";
   const elements = {};
 
   document.addEventListener("DOMContentLoaded", () => {
     cacheElements();
     bindEvents();
-    updateCustomContextVisibility();
+    loadSettings();
     refreshStatus();
     refreshUsageStats();
   });
@@ -18,6 +19,7 @@
     elements.deleteSelected = byId("delete-selected");
     elements.refresh = byId("refresh-list");
     elements.estimate = byId("estimate-context");
+    elements.contextEstimateEnabled = byId("context-estimate-enabled");
     elements.contextWindow = byId("context-window");
     elements.customContextRow = byId("custom-context-row");
     elements.customContextWindow = byId("custom-context-window");
@@ -36,6 +38,7 @@
     elements.deleteSelected.addEventListener("click", () => runAction("CCM_DELETE_SELECTED"));
     elements.refresh.addEventListener("click", () => runAction("CCM_REFRESH_LIST"));
     elements.estimate.addEventListener("click", estimateContext);
+    elements.contextEstimateEnabled.addEventListener("change", saveContextEstimateSetting);
     elements.contextWindow.addEventListener("change", updateCustomContextVisibility);
     elements.recordUsage.addEventListener("click", recordCurrentUsage);
     elements.refreshUsage.addEventListener("click", refreshUsageStats);
@@ -49,6 +52,17 @@
     } catch (error) {
       setStatus("Open or refresh https://chatgpt.com/, then try again.");
     }
+  }
+
+  async function loadSettings() {
+    try {
+      const settings = await readSettings();
+      elements.contextEstimateEnabled.checked = settings.contextEstimateEnabled !== false;
+    } catch (error) {
+      elements.contextEstimateEnabled.checked = true;
+    }
+
+    applyContextEstimateAvailability(false);
   }
 
   async function runAction(type) {
@@ -67,6 +81,11 @@
   }
 
   async function estimateContext() {
+    if (!isContextEstimateEnabled()) {
+      elements.estimateOutput.innerHTML = '<div class="warning">Context estimate is turned off.</div>';
+      return;
+    }
+
     setBusy(true);
     elements.estimateOutput.textContent = "Estimating loaded context...";
 
@@ -83,6 +102,23 @@
       setStatus(error.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveContextEstimateSetting() {
+    const enabled = isContextEstimateEnabled();
+    applyContextEstimateAvailability(false);
+
+    if (!enabled) {
+      elements.estimateOutput.innerHTML = '<div class="warning">Context estimate is turned off.</div>';
+    }
+
+    try {
+      const settings = await readSettings();
+      settings.contextEstimateEnabled = enabled;
+      await writeSettings(settings);
+    } catch (error) {
+      // Local file smoke tests do not provide chrome.storage.
     }
   }
 
@@ -175,16 +211,37 @@
     const estimatedVisibleTokens = Number(estimate.estimatedVisibleTokens || estimate.tokens || 0);
     const selectedContextWindow = Number(estimate.selectedContextWindow || estimate.contextWindow || 128000);
     const methodLabel = formatEstimatorMethod(estimate);
+    const mediaRows = renderMediaRows(estimate);
     elements.estimateOutput.innerHTML = `
       <div class="metric"><span>Estimated visible tokens</span><strong>${formatNumber(estimatedVisibleTokens)}</strong></div>
+      <div class="metric"><span>Text tokens</span><strong>${formatNumber(estimate.textTokens || estimatedVisibleTokens)}</strong></div>
       <div class="metric"><span>Characters</span><strong>${formatNumber(estimate.characters)}</strong></div>
       <div class="metric"><span>Messages</span><strong>${formatNumber(estimate.messages)}</strong></div>
+      ${mediaRows}
       <div class="metric"><span>Estimator</span><strong>${escapeHtml(methodLabel)}</strong></div>
       <div class="meter" aria-label="Approximate loaded-page context usage">
         <div class="meter-fill" style="width: ${Math.min(percentage, 100).toFixed(2)}%"></div>
       </div>
       <div class="warning">${percentage.toFixed(2)}% of selected ${formatNumber(selectedContextWindow)} token window. Loaded page only, not backend context.</div>
     `;
+  }
+
+  function renderMediaRows(estimate) {
+    const rows = [];
+    if (Number(estimate.imageCount || 0) > 0) {
+      rows.push(`<div class="metric"><span>Images</span><strong>${formatNumber(estimate.imageCount)} / ${formatNumber(estimate.imageTokens)} tokens</strong></div>`);
+    }
+
+    if (Number(estimate.pdfCount || 0) > 0) {
+      rows.push(`<div class="metric"><span>PDFs</span><strong>${formatNumber(estimate.analyzedPdfCount || 0)} analyzed / ${formatNumber(estimate.pdfCount)} found</strong></div>`);
+      rows.push(`<div class="metric"><span>PDF text</span><strong>${formatNumber(estimate.pdfTextTokens || 0)} tokens</strong></div>`);
+      rows.push(`<div class="metric"><span>PDF image pages</span><strong>${formatNumber(estimate.pdfImagePages || 0)} / ${formatNumber(estimate.pdfImageTokens || 0)} tokens</strong></div>`);
+      if (Number(estimate.inaccessiblePdfCount || 0) > 0) {
+        rows.push(`<div class="warning">${formatNumber(estimate.inaccessiblePdfCount)} PDF attachment(s) detected but not accessible to the browser extension.</div>`);
+      }
+    }
+
+    return rows.join("");
   }
 
   function formatEstimatorMethod(estimate) {
@@ -197,11 +254,23 @@
 
   function updateCustomContextVisibility() {
     const isCustom = elements.contextWindow.value === "custom";
-    elements.customContextRow.classList.toggle("hidden", !isCustom);
+    elements.customContextRow.classList.toggle("hidden", !isCustom || !isContextEstimateEnabled());
 
     if (isCustom) {
       elements.customContextWindow.value = sanitizeContextWindow(elements.customContextWindow.value);
     }
+  }
+
+  function isContextEstimateEnabled() {
+    return Boolean(elements.contextEstimateEnabled && elements.contextEstimateEnabled.checked);
+  }
+
+  function applyContextEstimateAvailability(isBusy) {
+    const enabled = isContextEstimateEnabled();
+    elements.contextWindow.disabled = isBusy || !enabled;
+    elements.customContextWindow.disabled = isBusy || !enabled;
+    elements.estimate.disabled = isBusy || !enabled;
+    updateCustomContextVisibility();
   }
 
   function getSelectedContextWindow() {
@@ -278,7 +347,7 @@
       elements.deselect,
       elements.deleteSelected,
       elements.refresh,
-      elements.estimate,
+      elements.contextEstimateEnabled,
       elements.recordUsage,
       elements.refreshUsage,
       elements.resetUsage
@@ -286,6 +355,7 @@
       .forEach((button) => {
         button.disabled = isBusy;
       });
+    applyContextEstimateAvailability(isBusy);
   }
 
   function byId(id) {
@@ -393,6 +463,28 @@
   async function writeUsageStats(stats) {
     return new Promise((resolve, reject) => {
       chrome.storage.local.set({ [USAGE_STORAGE_KEY]: normalizeUsageStats(stats) }, () => {
+        const error = chrome.runtime && chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  async function readSettings() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([SETTINGS_STORAGE_KEY], (items) => {
+        const settings = items && items[SETTINGS_STORAGE_KEY];
+        resolve(settings && typeof settings === "object" ? settings : {});
+      });
+    });
+  }
+
+  async function writeSettings(settings) {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: settings || {} }, () => {
         const error = chrome.runtime && chrome.runtime.lastError;
         if (error) {
           reject(new Error(error.message));

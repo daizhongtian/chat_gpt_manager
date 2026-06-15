@@ -124,6 +124,18 @@ button:disabled {
   gap: 10px;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #10a37f;
+}
+
 .estimate-output,
 .usage-output {
   display: grid;

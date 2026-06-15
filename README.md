@@ -43,8 +43,9 @@ If one deletion fails, the extension logs the failure in the browser console and
 ### Estimate Context
 
 1. Choose an approximate context window, such as `128K`.
-2. Click **Estimate Context** in the extension popup.
-3. Review estimated tokens, characters, messages, and approximate percentage usage.
+2. Leave **Enable context estimate** on.
+3. Click **Estimate Context** in the extension popup.
+4. Review estimated tokens, characters, messages, and approximate percentage usage.
 
 The estimator first tries the bundled local `gpt-tokenizer`. If that fails, it falls back to a local rule-based estimate:
 
@@ -57,6 +58,8 @@ The estimator first tries the bundled local `gpt-tokenizer`. If that fails, it f
 - Emoji: about 3 tokens each
 
 Usage percentage is calculated as `estimatedVisibleTokens / selectedContextWindow * 100`. The context window can be set to `16K`, `32K`, `64K`, `128K`, or a custom token value.
+
+When context estimation is enabled, the extension also looks for loaded images and visible PDF attachments. Images are estimated locally from rendered dimensions. PDFs are analyzed locally with bundled `pdf.js` only when the browser can access the PDF data, such as same-origin or blob URLs. If ChatGPT does not expose the original PDF file to the page, the extension reports the PDF as detected but inaccessible instead of guessing hidden backend tokens.
 
 ### Usage Counter
 
@@ -77,6 +80,7 @@ Usage counts start after the extension is installed and loaded. The extension ca
 - The token/context count is only an estimate.
 - The estimate only reads message content currently loaded in the ChatGPT page.
 - It cannot see hidden system prompts, memory, tools, uploaded file content, file parsing results, backend-compressed context, or any other model-side context that is not visible in the page.
+- PDF analysis only works when the browser extension can access the actual PDF bytes from the page.
 - It cannot know the real backend model context window; the percentage uses the context window you choose in the popup.
 - Usage counting depends on visible ChatGPT UI labels and send controls. If ChatGPT changes its model picker or composer, automatic counting may miss or mislabel some sends.
 - Usage counting is not an official OpenAI quota meter. It cannot verify billing, subscription limits, backend model routing, retries, or messages sent from other browsers/devices.
@@ -96,6 +100,7 @@ Usage counts start after the extension is installed and loaded. The extension ca
 - `content.js` handles sidebar checkboxes, deletion flow, MutationObserver refresh, local context estimation, and local usage counting.
 - `styles.css` styles only the temporary page-side checkbox, confirmation dialog, and progress toast.
 - `vendor/chatgpt-cleaner-tokenizer.js` is a bundled local `gpt-tokenizer` build used before the fallback estimator.
+- `vendor/chatgpt-cleaner-pdf-analyzer.js` and `vendor/chatgpt-cleaner-pdf-analyzer.worker.js` are bundled local `pdf.js` files used for accessible PDF text/image estimates.
 - `tests/smoke.html` is a local manual smoke-test page that mimics enough of ChatGPT's DOM to test the extension script safely.
 
 ## Optional local smoke test

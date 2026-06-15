@@ -293,6 +293,7 @@
     });
   </script>
   <script src="../vendor/chatgpt-cleaner-tokenizer.js"></script>
+  <script src="../vendor/chatgpt-cleaner-pdf-analyzer.js"></script>
   <script>
     const status = document.getElementById("test-status");
     let apiPromise = null;
@@ -358,7 +359,7 @@
 
     document.getElementById("test-estimate").addEventListener("click", async () => {
       const api = await getApi();
-      const estimate = api.estimateVisibleContext(Number(document.getElementById("test-window").value));
+      const estimate = await api.estimateVisibleContext(Number(document.getElementById("test-window").value));
       showStatus(`${estimate.tokens} tokens, ${estimate.messages} messages, ${estimate.percentage.toFixed(2)}%, ${estimate.method}`);
     });
 
