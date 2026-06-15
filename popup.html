@@ -27,14 +27,16 @@
       <label class="field">
         <span>Context window</span>
         <select id="context-window">
-          <option value="8000">8K</option>
           <option value="16000">16K</option>
           <option value="32000">32K</option>
           <option value="64000">64K</option>
           <option value="128000" selected>128K</option>
-          <option value="200000">200K</option>
-          <option value="1000000">1M</option>
+          <option value="custom">Custom</option>
         </select>
+      </label>
+      <label id="custom-context-row" class="field hidden">
+        <span>Custom tokens</span>
+        <input id="custom-context-window" type="number" min="1000" step="1000" value="128000" inputmode="numeric" />
       </label>
       <button type="button" id="estimate-context" class="wide">Estimate Context</button>
       <div id="estimate-output" class="estimate-output" aria-live="polite"></div>

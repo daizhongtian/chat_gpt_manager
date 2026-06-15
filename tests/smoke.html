@@ -205,9 +205,10 @@
     <label>
       <span class="sr-only">Context window</span>
       <select id="test-window">
-        <option value="8000">8K</option>
+        <option value="16000">16K</option>
+        <option value="32000">32K</option>
+        <option value="64000">64K</option>
         <option value="128000" selected>128K</option>
-        <option value="200000">200K</option>
       </select>
     </label>
     <span id="test-status" class="test-status">Ready</span>
@@ -291,6 +292,7 @@
       textarea.value = "";
     });
   </script>
+  <script src="../vendor/chatgpt-cleaner-tokenizer.js"></script>
   <script>
     const status = document.getElementById("test-status");
     let apiPromise = null;
@@ -357,7 +359,7 @@
     document.getElementById("test-estimate").addEventListener("click", async () => {
       const api = await getApi();
       const estimate = api.estimateVisibleContext(Number(document.getElementById("test-window").value));
-      showStatus(`${estimate.tokens} tokens, ${estimate.messages} messages, ${estimate.percentage.toFixed(2)}%`);
+      showStatus(`${estimate.tokens} tokens, ${estimate.messages} messages, ${estimate.percentage.toFixed(2)}%, ${estimate.method}`);
     });
 
     document.getElementById("test-record-usage").addEventListener("click", async () => {

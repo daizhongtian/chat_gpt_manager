@@ -46,7 +46,17 @@ If one deletion fails, the extension logs the failure in the browser console and
 2. Click **Estimate Context** in the extension popup.
 3. Review estimated tokens, characters, messages, and approximate percentage usage.
 
-The estimator is local and dependency-free. It uses a conservative heuristic for CJK text, English words, numbers, URLs/code-like text, punctuation, line breaks, and per-message overhead. It also adds a safety margin to reduce underestimation. This is usually better than a pure character-count estimate, but it is still not a real tokenizer.
+The estimator first tries the bundled local `gpt-tokenizer`. If that fails, it falls back to a local rule-based estimate:
+
+- English/European text: characters / 4
+- Chinese CJK text: characters / 1.5
+- Japanese text: characters / 1.2
+- Korean text: characters / 1.3
+- Code: characters / 3
+- URL/JSON-like text: characters / 2.5
+- Emoji: about 3 tokens each
+
+Usage percentage is calculated as `estimatedVisibleTokens / selectedContextWindow * 100`. The context window can be set to `16K`, `32K`, `64K`, `128K`, or a custom token value.
 
 ### Usage Counter
 
@@ -85,6 +95,7 @@ Usage counts start after the extension is installed and loaded. The extension ca
 - `popup.html`, `popup.css`, and `popup.js` provide the Chrome extension popup controls.
 - `content.js` handles sidebar checkboxes, deletion flow, MutationObserver refresh, local context estimation, and local usage counting.
 - `styles.css` styles only the temporary page-side checkbox, confirmation dialog, and progress toast.
+- `vendor/chatgpt-cleaner-tokenizer.js` is a bundled local `gpt-tokenizer` build used before the fallback estimator.
 - `tests/smoke.html` is a local manual smoke-test page that mimics enough of ChatGPT's DOM to test the extension script safely.
 
 ## Optional local smoke test

@@ -7,6 +7,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     cacheElements();
     bindEvents();
+    updateCustomContextVisibility();
     refreshStatus();
     refreshUsageStats();
   });
@@ -18,6 +19,8 @@
     elements.refresh = byId("refresh-list");
     elements.estimate = byId("estimate-context");
     elements.contextWindow = byId("context-window");
+    elements.customContextRow = byId("custom-context-row");
+    elements.customContextWindow = byId("custom-context-window");
     elements.status = byId("conversation-status");
     elements.estimateOutput = byId("estimate-output");
     elements.currentModel = byId("current-model");
@@ -33,6 +36,7 @@
     elements.deleteSelected.addEventListener("click", () => runAction("CCM_DELETE_SELECTED"));
     elements.refresh.addEventListener("click", () => runAction("CCM_REFRESH_LIST"));
     elements.estimate.addEventListener("click", estimateContext);
+    elements.contextWindow.addEventListener("change", updateCustomContextVisibility);
     elements.recordUsage.addEventListener("click", recordCurrentUsage);
     elements.refreshUsage.addEventListener("click", refreshUsageStats);
     elements.resetUsage.addEventListener("click", resetUsageStats);
@@ -67,9 +71,10 @@
     elements.estimateOutput.textContent = "Estimating loaded context...";
 
     try {
+      const selectedContextWindow = getSelectedContextWindow();
       const response = await sendToActiveTab({
         type: "CCM_ESTIMATE_CONTEXT",
-        contextWindow: Number(elements.contextWindow.value)
+        contextWindow: selectedContextWindow
       });
       renderStatus(response.status);
       renderEstimate(response.estimate);
@@ -167,16 +172,53 @@
     }
 
     const percentage = Math.max(0, estimate.percentage || 0);
+    const estimatedVisibleTokens = Number(estimate.estimatedVisibleTokens || estimate.tokens || 0);
+    const selectedContextWindow = Number(estimate.selectedContextWindow || estimate.contextWindow || 128000);
+    const methodLabel = formatEstimatorMethod(estimate);
     elements.estimateOutput.innerHTML = `
-      <div class="metric"><span>Estimated tokens</span><strong>${formatNumber(estimate.tokens)}</strong></div>
+      <div class="metric"><span>Estimated visible tokens</span><strong>${formatNumber(estimatedVisibleTokens)}</strong></div>
       <div class="metric"><span>Characters</span><strong>${formatNumber(estimate.characters)}</strong></div>
       <div class="metric"><span>Messages</span><strong>${formatNumber(estimate.messages)}</strong></div>
-      <div class="metric"><span>Estimator</span><strong>Conservative local</strong></div>
+      <div class="metric"><span>Estimator</span><strong>${escapeHtml(methodLabel)}</strong></div>
       <div class="meter" aria-label="Approximate loaded-page context usage">
         <div class="meter-fill" style="width: ${Math.min(percentage, 100).toFixed(2)}%"></div>
       </div>
-      <div class="warning">${percentage.toFixed(2)}% of selected ${formatNumber(estimate.contextWindow)} token window. Loaded page only, not backend context.</div>
+      <div class="warning">${percentage.toFixed(2)}% of selected ${formatNumber(selectedContextWindow)} token window. Loaded page only, not backend context.</div>
     `;
+  }
+
+  function formatEstimatorMethod(estimate) {
+    if (estimate && estimate.tokenizerUsed) {
+      return "gpt-tokenizer local";
+    }
+
+    return "Local fallback";
+  }
+
+  function updateCustomContextVisibility() {
+    const isCustom = elements.contextWindow.value === "custom";
+    elements.customContextRow.classList.toggle("hidden", !isCustom);
+
+    if (isCustom) {
+      elements.customContextWindow.value = sanitizeContextWindow(elements.customContextWindow.value);
+    }
+  }
+
+  function getSelectedContextWindow() {
+    if (elements.contextWindow.value === "custom") {
+      return Number(sanitizeContextWindow(elements.customContextWindow.value));
+    }
+
+    return Number(elements.contextWindow.value || 128000);
+  }
+
+  function sanitizeContextWindow(value) {
+    const numeric = Math.floor(Number(value || 0));
+    if (!Number.isFinite(numeric) || numeric < 1000) {
+      return "1000";
+    }
+
+    return String(numeric);
   }
 
   function renderUsageStats(stats) {

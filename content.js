@@ -1199,29 +1199,46 @@
     const messages = getVisibleMessages();
     const text = messages.map((message) => message.text).join("\n\n");
     const estimate = estimateTokens(text, { messageCount: messages.length });
-    const contextWindow = Number(contextWindowValue || 128000);
-    const percentage = contextWindow > 0 ? (estimate.tokens / contextWindow) * 100 : 0;
+    const selectedContextWindow = sanitizeContextWindow(contextWindowValue);
+    const percentage = selectedContextWindow > 0 ? (estimate.tokens / selectedContextWindow) * 100 : 0;
 
     state.lastEstimate = {
+      estimatedVisibleTokens: estimate.tokens,
       tokens: estimate.tokens,
       characters: text.length,
       messages: messages.length,
-      contextWindow,
+      selectedContextWindow,
+      contextWindow: selectedContextWindow,
       percentage,
       method: estimate.method,
       cjkCharacters: estimate.cjkCharacters,
+      chineseCharacters: estimate.chineseCharacters,
+      japaneseCharacters: estimate.japaneseCharacters,
+      koreanCharacters: estimate.koreanCharacters,
+      codeCharacters: estimate.codeCharacters,
+      urlJsonCharacters: estimate.urlJsonCharacters,
+      emojiCount: estimate.emojiCount,
       nonCjkCharacters: estimate.nonCjkCharacters,
       englishWordCount: estimate.englishWordCount,
       numberCount: estimate.numberCount,
       urlCount: estimate.urlCount,
       punctuationCount: estimate.punctuationCount,
-      messageOverheadTokens: estimate.messageOverheadTokens,
-      safetyMarginTokens: estimate.safetyMarginTokens,
+      tokenizerUsed: estimate.tokenizerUsed,
+      tokenizerError: estimate.tokenizerError,
       warning: "Loaded page content only. This is not the real model backend context."
     };
 
     logMessage(`Estimated ${formatNumber(estimate.tokens)} loaded-page tokens across ${messages.length} messages.`);
     return state.lastEstimate;
+  }
+
+  function sanitizeContextWindow(value) {
+    const numeric = Math.floor(Number(value || 128000));
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return 128000;
+    }
+
+    return numeric;
   }
 
   function getVisibleMessages() {
@@ -1277,70 +1294,199 @@
 
   function estimateTokens(text, options = {}) {
     const source = String(text || "");
-    const messageCount = Math.max(0, Number(options.messageCount || 0));
     if (!source) {
       return {
         tokens: 0,
+        tokenizerUsed: false,
         cjkCharacters: 0,
+        chineseCharacters: 0,
+        japaneseCharacters: 0,
+        koreanCharacters: 0,
+        codeCharacters: 0,
+        urlJsonCharacters: 0,
+        emojiCount: 0,
         nonCjkCharacters: 0,
         englishWordCount: 0,
         numberCount: 0,
         urlCount: 0,
         punctuationCount: 0,
-        messageOverheadTokens: 0,
-        safetyMarginTokens: 0,
-        method: "conservative-local-v3"
+        tokenizerError: "",
+        method: "empty"
       };
     }
 
-    const cjkRegex = /[\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]/g;
+    const fallback = estimateTokensFallback(source, options);
+    const tokenizerEstimate = estimateTokensWithLocalTokenizer(source);
+    if (tokenizerEstimate.ok) {
+      return Object.assign({}, fallback, {
+        tokens: tokenizerEstimate.tokens,
+        tokenizerUsed: true,
+        tokenizerError: "",
+        method: "gpt-tokenizer-local"
+      });
+    }
+
+    return Object.assign({}, fallback, {
+      tokenizerUsed: false,
+      tokenizerError: tokenizerEstimate.error,
+      method: "local-fallback"
+    });
+  }
+
+  function estimateTokensWithLocalTokenizer(text) {
+    try {
+      const tokenizer = globalThis.ChatGPTCleanerTokenizer;
+      if (!tokenizer || typeof tokenizer.count !== "function") {
+        return {
+          ok: false,
+          error: "Local gpt-tokenizer is not loaded."
+        };
+      }
+
+      const tokens = Number(tokenizer.count(text));
+      if (!Number.isFinite(tokens) || tokens < 0) {
+        return {
+          ok: false,
+          error: "Local gpt-tokenizer returned an invalid count."
+        };
+      }
+
+      return {
+        ok: true,
+        tokens
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error && error.message ? error.message : String(error)
+      };
+    }
+  }
+
+  function estimateTokensFallback(text, options = {}) {
+    const source = String(text || "");
+    const messageCount = Math.max(0, Number(options.messageCount || 0));
     const urlRegex = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
-    const cjkMatches = source.match(cjkRegex) || [];
-    const urlMatches = source.match(urlRegex) || [];
-    const cjkCharacters = cjkMatches.length;
+    const emojiRegex = /\p{Extended_Pictographic}/gu;
+    const chineseRegex = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/g;
+    const japaneseRegex = /[\u3040-\u30FF\u31F0-\u31FF]/g;
+    const koreanRegex = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/g;
+    const englishWordRegex = /[A-Za-zÀ-ÖØ-öø-ÿ]+(?:['-][A-Za-zÀ-ÖØ-öø-ÿ]+)?/g;
+    const numberRegex = /\b\d+(?:[.,:/-]\d+)*\b/g;
+    const punctuationRegex = /[^\sA-Za-zÀ-ÖØ-öø-ÿ0-9\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u30FF\u31F0-\u31FF\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/g;
+    const lines = source.split(/\n+/);
+    let chineseCharacters = 0;
+    let japaneseCharacters = 0;
+    let koreanCharacters = 0;
+    let codeCharacters = 0;
+    let urlJsonCharacters = 0;
+    let emojiCount = 0;
+    let latinLikeCharacters = 0;
+    let urlCount = 0;
+    let numberCount = 0;
+    let punctuationCount = 0;
+    let estimated = 0;
+
+    lines.forEach((line) => {
+      const sourceLine = String(line || "");
+      if (!sourceLine) {
+        return;
+      }
+
+      const urls = sourceLine.match(urlRegex) || [];
+      urlCount += urls.length;
+      urlJsonCharacters += sum(urls.map((url) => url.length));
+      estimated += sum(urls.map((url) => url.length / 2.5));
+
+      let remainder = sourceLine.replace(urlRegex, " ");
+      if (isJsonLikeText(remainder)) {
+        const jsonLength = cleanText(remainder).length;
+        urlJsonCharacters += jsonLength;
+        estimated += jsonLength / 2.5;
+        return;
+      }
+
+      if (isCodeLikeText(remainder)) {
+        const codeLength = cleanText(remainder).length;
+        codeCharacters += codeLength;
+        estimated += codeLength / 3;
+        return;
+      }
+
+      const emojiMatches = remainder.match(emojiRegex) || [];
+      emojiCount += emojiMatches.length;
+      estimated += emojiMatches.length * 3;
+      remainder = remainder.replace(emojiRegex, " ");
+
+      const chineseMatches = remainder.match(chineseRegex) || [];
+      chineseCharacters += chineseMatches.length;
+      estimated += chineseMatches.length / 1.5;
+      remainder = remainder.replace(chineseRegex, " ");
+
+      const japaneseMatches = remainder.match(japaneseRegex) || [];
+      japaneseCharacters += japaneseMatches.length;
+      estimated += japaneseMatches.length / 1.2;
+      remainder = remainder.replace(japaneseRegex, " ");
+
+      const koreanMatches = remainder.match(koreanRegex) || [];
+      koreanCharacters += koreanMatches.length;
+      estimated += koreanMatches.length / 1.3;
+      remainder = remainder.replace(koreanRegex, " ");
+
+      const numbers = remainder.match(numberRegex) || [];
+      numberCount += numbers.length;
+      const punctuation = remainder.match(punctuationRegex) || [];
+      punctuationCount += punctuation.length;
+      const latinText = cleanText(remainder);
+      latinLikeCharacters += latinText.length;
+      estimated += latinText.length / 4;
+    });
+
+    const englishWords = source.match(englishWordRegex) || [];
+    const cjkCharacters = chineseCharacters + japaneseCharacters + koreanCharacters;
     const nonCjkCharacters = Math.max(source.length - cjkCharacters, 0);
 
-    // Remove high-density pieces before counting normal words so URLs do not
-    // get counted twice. This stays local and dependency-free.
-    const withoutCjk = source.replace(cjkRegex, " ");
-    const withoutUrls = withoutCjk.replace(urlRegex, " ");
-    const englishWords = withoutUrls.match(/[A-Za-z]+(?:['-][A-Za-z]+)?/g) || [];
-    const numbers = withoutUrls.match(/\b\d+(?:[.,:/-]\d+)*\b/g) || [];
-    const punctuation = source.match(/[^\sA-Za-z0-9\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]/g) || [];
-    const lineBreaks = source.match(/\n+/g) || [];
-    const urlCharacterCount = sum(urlMatches.map((url) => url.length));
-
-    // Conservative local estimate:
-    // - CJK text is close to one token per visible character in many model
-    //   tokenizers, so use a high-density estimate.
-    // - English, code, URLs, numbers, punctuation, and line breaks often split
-    //   more densely than plain "characters / 4".
-    // - Add a small per-message overhead plus a safety margin so the meter is
-    //   less likely to understate loaded context.
-    const cjkTokens = cjkCharacters;
-    const urlTokens = sum(urlMatches.map((url) => Math.max(2, url.length / 2.4)));
-    const wordTokens = sum(englishWords.map((word) => Math.max(1, word.length / 3.6)));
-    const numberTokens = sum(numbers.map((number) => Math.max(1, number.length / 2.8)));
-    const punctuationTokens = punctuation.length * 0.55;
-    const lineBreakTokens = lineBreaks.length * 0.45;
-    const structuralNonCjkTokens = urlTokens + wordTokens + numberTokens + punctuationTokens + lineBreakTokens;
-    const characterNonCjkTokens = (Math.max(nonCjkCharacters - urlCharacterCount, 0) / 3.15) + urlTokens;
-    const contentTokens = cjkTokens + Math.max(structuralNonCjkTokens, characterNonCjkTokens);
-    const messageOverheadTokens = messageCount > 0 ? (messageCount * 8) + 4 : 0;
-    const safetyMarginTokens = Math.ceil(contentTokens * 0.16);
-
     return {
-      tokens: Math.ceil(contentTokens + messageOverheadTokens + safetyMarginTokens),
+      tokens: Math.ceil(estimated),
       cjkCharacters,
+      chineseCharacters,
+      japaneseCharacters,
+      koreanCharacters,
+      codeCharacters,
+      urlJsonCharacters,
+      emojiCount,
       nonCjkCharacters,
       englishWordCount: englishWords.length,
-      numberCount: numbers.length,
-      urlCount: urlMatches.length,
-      punctuationCount: punctuation.length,
-      messageOverheadTokens,
-      safetyMarginTokens,
-      method: "conservative-local-v3"
+      numberCount,
+      urlCount,
+      punctuationCount,
+      messageCount,
+      tokenizerUsed: false,
+      tokenizerError: "",
+      method: "local-fallback"
     };
+  }
+
+  function isJsonLikeText(text) {
+    const value = cleanText(text);
+    if (value.length < 8) {
+      return false;
+    }
+
+    return /^[\[{]/.test(value) &&
+      /[\]}]$/.test(value) &&
+      /["']?[A-Za-z0-9_-]+["']?\s*:/.test(value);
+  }
+
+  function isCodeLikeText(text) {
+    const value = cleanText(text);
+    if (value.length < 8) {
+      return false;
+    }
+
+    const syntaxHits = (value.match(/[{}()[\];=<>]|=>|::|\.\w+\(/g) || []).length;
+    const keywordHit = /\b(function|const|let|var|return|class|import|export|if|else|for|while|try|catch|def|print|public|private|SELECT|FROM|WHERE)\b/.test(value);
+    return keywordHit || syntaxHits >= 3;
   }
 
   function sum(values) {
