@@ -64,7 +64,7 @@
 
   async function estimateContext() {
     setBusy(true);
-    elements.estimateOutput.textContent = "Estimating visible context...";
+    elements.estimateOutput.textContent = "Estimating loaded context...";
 
     try {
       const response = await sendToActiveTab({
@@ -168,14 +168,14 @@
 
     const percentage = Math.max(0, estimate.percentage || 0);
     elements.estimateOutput.innerHTML = `
-      <div class="metric"><span>Visible tokens</span><strong>${formatNumber(estimate.tokens)}</strong></div>
+      <div class="metric"><span>Estimated tokens</span><strong>${formatNumber(estimate.tokens)}</strong></div>
       <div class="metric"><span>Characters</span><strong>${formatNumber(estimate.characters)}</strong></div>
       <div class="metric"><span>Messages</span><strong>${formatNumber(estimate.messages)}</strong></div>
-      <div class="metric"><span>Estimator</span><strong>Hybrid local</strong></div>
-      <div class="meter" aria-label="Approximate visible context usage">
+      <div class="metric"><span>Estimator</span><strong>Conservative local</strong></div>
+      <div class="meter" aria-label="Approximate loaded-page context usage">
         <div class="meter-fill" style="width: ${Math.min(percentage, 100).toFixed(2)}%"></div>
       </div>
-      <div class="warning">${percentage.toFixed(2)}% of selected ${formatNumber(estimate.contextWindow)} token window. Visible page only, not backend context.</div>
+      <div class="warning">${percentage.toFixed(2)}% of selected ${formatNumber(estimate.contextWindow)} token window. Loaded page only, not backend context.</div>
     `;
   }
 

@@ -619,6 +619,22 @@
       return false;
     }
 
+    if (!isRenderedElement(element)) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return rect.bottom >= 0 &&
+      rect.right >= 0 &&
+      rect.top <= (window.innerHeight || document.documentElement.clientHeight) &&
+      rect.left <= (window.innerWidth || document.documentElement.clientWidth);
+  }
+
+  function isRenderedElement(element) {
+    if (!element || !(element instanceof Element)) {
+      return false;
+    }
+
     const style = window.getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
       return false;
@@ -629,10 +645,7 @@
       return false;
     }
 
-    return rect.bottom >= 0 &&
-      rect.right >= 0 &&
-      rect.top <= (window.innerHeight || document.documentElement.clientHeight) &&
-      rect.left <= (window.innerWidth || document.documentElement.clientWidth);
+    return true;
   }
 
   function isInsideExtensionUi(element) {
@@ -1039,7 +1052,7 @@
   function estimateVisibleContext(contextWindowValue) {
     const messages = getVisibleMessages();
     const text = messages.map((message) => message.text).join("\n\n");
-    const estimate = estimateTokens(text);
+    const estimate = estimateTokens(text, { messageCount: messages.length });
     const contextWindow = Number(contextWindowValue || 128000);
     const percentage = contextWindow > 0 ? (estimate.tokens / contextWindow) * 100 : 0;
 
@@ -1056,10 +1069,12 @@
       numberCount: estimate.numberCount,
       urlCount: estimate.urlCount,
       punctuationCount: estimate.punctuationCount,
-      warning: "Visible page only. This is not the real model backend context."
+      messageOverheadTokens: estimate.messageOverheadTokens,
+      safetyMarginTokens: estimate.safetyMarginTokens,
+      warning: "Loaded page content only. This is not the real model backend context."
     };
 
-    logMessage(`Estimated ${formatNumber(estimate.tokens)} visible tokens across ${messages.length} messages.`);
+    logMessage(`Estimated ${formatNumber(estimate.tokens)} loaded-page tokens across ${messages.length} messages.`);
     return state.lastEstimate;
   }
 
@@ -1075,24 +1090,25 @@
     let elements = [];
     for (const selectors of selectorGroups) {
       elements = Array.from(main.querySelectorAll(selectors))
-        .filter((element) => !isInsideExtensionUi(element) && isVisibleElement(element));
+        .filter((element) => !isInsideExtensionUi(element) && isRenderedElement(element));
 
       if (elements.length) {
         break;
       }
     }
 
-    const seen = new Set();
-    return elements
+    return dedupeMessageElements(elements)
       .map((element) => extractReadableText(element))
-      .filter((text) => {
-        if (!text || seen.has(text)) {
-          return false;
-        }
-        seen.add(text);
-        return true;
-      })
+      .filter(Boolean)
       .map((text) => ({ text }));
+  }
+
+  function dedupeMessageElements(elements) {
+    return elements.filter((element, index) => {
+      return !elements.some((other, otherIndex) => {
+        return otherIndex !== index && other !== element && other.contains(element);
+      });
+    });
   }
 
   function extractReadableText(element) {
@@ -1113,8 +1129,9 @@
     return cleanText(clone.textContent);
   }
 
-  function estimateTokens(text) {
+  function estimateTokens(text, options = {}) {
     const source = String(text || "");
+    const messageCount = Math.max(0, Number(options.messageCount || 0));
     if (!source) {
       return {
         tokens: 0,
@@ -1124,7 +1141,9 @@
         numberCount: 0,
         urlCount: 0,
         punctuationCount: 0,
-        method: "hybrid-local-v2"
+        messageOverheadTokens: 0,
+        safetyMarginTokens: 0,
+        method: "conservative-local-v3"
       };
     }
 
@@ -1143,28 +1162,38 @@
     const numbers = withoutUrls.match(/\b\d+(?:[.,:/-]\d+)*\b/g) || [];
     const punctuation = source.match(/[^\sA-Za-z0-9\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]/g) || [];
     const lineBreaks = source.match(/\n+/g) || [];
+    const urlCharacterCount = sum(urlMatches.map((url) => url.length));
 
-    const cjkTokens = cjkCharacters / 1.5;
-    const urlTokens = sum(urlMatches.map((url) => Math.max(1, url.length / 3.2)));
-    const wordTokens = englishWords.length * 1.28;
-    const numberTokens = numbers.length * 1.15;
-    const punctuationTokens = punctuation.length * 0.35;
-    const lineBreakTokens = lineBreaks.length * 0.25;
+    // Conservative local estimate:
+    // - CJK text is close to one token per visible character in many model
+    //   tokenizers, so use a high-density estimate.
+    // - English, code, URLs, numbers, punctuation, and line breaks often split
+    //   more densely than plain "characters / 4".
+    // - Add a small per-message overhead plus a safety margin so the meter is
+    //   less likely to understate loaded context.
+    const cjkTokens = cjkCharacters;
+    const urlTokens = sum(urlMatches.map((url) => Math.max(2, url.length / 2.4)));
+    const wordTokens = sum(englishWords.map((word) => Math.max(1, word.length / 3.6)));
+    const numberTokens = sum(numbers.map((number) => Math.max(1, number.length / 2.8)));
+    const punctuationTokens = punctuation.length * 0.55;
+    const lineBreakTokens = lineBreaks.length * 0.45;
     const structuralNonCjkTokens = urlTokens + wordTokens + numberTokens + punctuationTokens + lineBreakTokens;
-    const characterNonCjkTokens = nonCjkCharacters / 4;
-    const nonCjkTokens = structuralNonCjkTokens > 0
-      ? (structuralNonCjkTokens * 0.65) + (characterNonCjkTokens * 0.35)
-      : characterNonCjkTokens;
+    const characterNonCjkTokens = (Math.max(nonCjkCharacters - urlCharacterCount, 0) / 3.15) + urlTokens;
+    const contentTokens = cjkTokens + Math.max(structuralNonCjkTokens, characterNonCjkTokens);
+    const messageOverheadTokens = messageCount > 0 ? (messageCount * 8) + 4 : 0;
+    const safetyMarginTokens = Math.ceil(contentTokens * 0.16);
 
     return {
-      tokens: Math.ceil(cjkTokens + nonCjkTokens),
+      tokens: Math.ceil(contentTokens + messageOverheadTokens + safetyMarginTokens),
       cjkCharacters,
       nonCjkCharacters,
       englishWordCount: englishWords.length,
       numberCount: numbers.length,
       urlCount: urlMatches.length,
       punctuationCount: punctuation.length,
-      method: "hybrid-local-v2"
+      messageOverheadTokens,
+      safetyMarginTokens,
+      method: "conservative-local-v3"
     };
   }
 

@@ -5,7 +5,7 @@ A small Chrome Manifest V3 extension for `https://chatgpt.com/*`.
 It has three focused features:
 
 - Batch delete selected visible ChatGPT conversations from the left sidebar.
-- Estimate the token/context usage of the visible messages on the current conversation page.
+- Estimate the token/context usage of the loaded messages on the current conversation page.
 - Count local ChatGPT message sends by visible model label, such as `ChatGPT Pro`.
 
 The extension is opened from the Chrome extension icon. It does not show a permanent floating toolbar on the ChatGPT page.
@@ -44,9 +44,9 @@ If one deletion fails, the extension logs the failure in the browser console and
 
 1. Choose an approximate context window, such as `128K`.
 2. Click **Estimate Context** in the extension popup.
-3. Review visible estimated tokens, characters, messages, and approximate percentage usage.
+3. Review estimated tokens, characters, messages, and approximate percentage usage.
 
-The estimator is local and dependency-free. It uses a hybrid heuristic for CJK text, English words, numbers, URLs/code-like text, punctuation, and line breaks. This is usually better than a pure character-count estimate, but it is still not a real tokenizer.
+The estimator is local and dependency-free. It uses a conservative heuristic for CJK text, English words, numbers, URLs/code-like text, punctuation, line breaks, and per-message overhead. It also adds a safety margin to reduce underestimation. This is usually better than a pure character-count estimate, but it is still not a real tokenizer.
 
 ### Usage Counter
 
@@ -64,7 +64,7 @@ Usage counts start after the extension is installed and loaded. The extension ca
 
 - Batch deletion depends on ChatGPT's webpage UI and may break if the website changes.
 - The token/context count is only an estimate.
-- The estimate only reads visible page content.
+- The estimate only reads message content currently loaded in the ChatGPT page.
 - It cannot see hidden system prompts, memory, tools, uploaded file content, file parsing results, backend-compressed context, or any other model-side context that is not visible in the page.
 - It cannot know the real backend model context window; the percentage uses the context window you choose in the popup.
 - Usage counting depends on visible ChatGPT UI labels and send controls. If ChatGPT changes its model picker or composer, automatic counting may miss or mislabel some sends.
