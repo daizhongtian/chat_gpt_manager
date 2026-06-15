@@ -4,7 +4,8 @@
   const TOAST_ID = "ccm-toast";
   const CHECKBOX_CLASS = "ccm-conversation-checkbox";
   const ENHANCED_ATTR = "data-ccm-enhanced";
-  const DELETE_DELAY_MS = 1400;
+  const DELETE_DELAY_MS = 650;
+  const MENU_HOVER_DELAY_MS = 180;
   const MEDIA_ESTIMATE_TIMEOUT_MS = 2500;
   const PDF_FETCH_TIMEOUT_MS = 2500;
   const USAGE_STORAGE_KEY = "ccmUsageStats";
@@ -907,7 +908,7 @@
     const row = findConversationRow(link);
     link.scrollIntoView({ block: "center", inline: "nearest" });
     dispatchHover(row || link);
-    await sleep(350);
+    await sleep(MENU_HOVER_DELAY_MS);
 
     const menuButton = findMenuButton(row || link, link);
     if (!menuButton) {
