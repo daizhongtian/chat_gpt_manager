@@ -409,11 +409,29 @@
   }
 
   function renderVisibleTextBlock(estimate) {
+    const userMessages = Number(estimate.userMessages || 0);
+    const assistantMessages = Number(estimate.assistantMessages || 0);
+    const otherMessages = Number(estimate.otherMessages || 0);
+    const userTextTokens = Number(estimate.userTextTokens || 0);
+    const assistantTextTokens = Number(estimate.assistantTextTokens || 0);
+    const otherTextTokens = Number(estimate.otherTextTokens || 0);
+    const messageBreakdown = userMessages || assistantMessages || otherMessages
+      ? ` (${formatNumber(userMessages)} user | ${formatNumber(assistantMessages)} GPT output${otherMessages ? ` | ${formatNumber(otherMessages)} other` : ""})`
+      : "";
+    const tokenBreakdown = userTextTokens || assistantTextTokens || otherTextTokens
+      ? `<span>User input ${formatNumber(userTextTokens)} tokens | GPT output ${formatNumber(assistantTextTokens)} tokens${otherTextTokens ? ` | Other ${formatNumber(otherTextTokens)} tokens` : ""}</span>`
+      : "";
+    const scanDetail = estimate.scanSteps
+      ? `<span>Scanned ${formatNumber(estimate.scanSteps)} scroll positions in ${escapeHtml(estimate.scanTarget || "page")}.</span>`
+      : "";
+
     return `
       <div class="estimate-panel">
         <h3>Scanned conversation text</h3>
         <strong>${formatNumber(estimate.textTokens || 0)} estimated tokens</strong>
-        <span>${formatNumber(estimate.characters)} characters | ${formatNumber(estimate.messages)} messages</span>
+        <span>${formatNumber(estimate.characters)} characters | ${formatNumber(estimate.messages)} messages${messageBreakdown}</span>
+        ${tokenBreakdown}
+        ${scanDetail}
       </div>
     `;
   }

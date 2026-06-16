@@ -4,8 +4,9 @@
   const TOAST_ID = "ccm-toast";
   const CHECKBOX_CLASS = "ccm-conversation-checkbox";
   const ENHANCED_ATTR = "data-ccm-enhanced";
-  const DELETE_DELAY_MS = 300;
-  const MENU_HOVER_DELAY_MS = 100;
+  const DELETE_DELAY_MS = 80;
+  const MENU_HOVER_DELAY_MS = 40;
+  const UI_POLL_INTERVAL_MS = 40;
   const MEDIA_ESTIMATE_TIMEOUT_MS = 6500;
   const PDF_FETCH_TIMEOUT_MS = 5000;
   const PDF_AUTO_ANALYSIS_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -896,7 +897,9 @@
         }
 
         setProgress(`Deleted ${deleted} / ${conversations.length}. Failures: ${failures.length}.`);
-        await sleep(DELETE_DELAY_MS);
+        if (index < conversations.length - 1) {
+          await sleep(DELETE_DELAY_MS);
+        }
       }
     } finally {
       state.isDeleting = false;
@@ -923,18 +926,18 @@
 
     logMessage(`Opening menu: ${conversation.title}`);
     clickElement(menuButton);
-    const deleteItem = await waitFor(() => findDeleteMenuItem(), 5000, 100);
+    const deleteItem = await waitFor(() => findDeleteMenuItem(), 5000, UI_POLL_INTERVAL_MS);
     logMessage(`Clicking delete menu item: ${conversation.title}`);
     clickElement(deleteItem);
 
-    const confirmButton = await waitFor(() => findConfirmDeleteButton(), 7000, 100);
+    const confirmButton = await waitFor(() => findConfirmDeleteButton(), 7000, UI_POLL_INTERVAL_MS);
     logMessage(`Confirming deletion: ${conversation.title}`);
     clickElement(confirmButton);
 
     await waitFor(() => {
       const currentLink = findConversationLinkByKey(conversation.key);
       return !currentLink || !isVisibleElement(currentLink);
-    }, 9000, 150);
+    }, 9000, UI_POLL_INTERVAL_MS);
   }
 
   function findConversationLinkByKey(key) {
@@ -1154,9 +1157,11 @@
   }
 
   async function estimateVisibleContext(contextWindowValue) {
-    const messages = await collectConversationMessagesForEstimate();
+    const scanResult = await collectConversationMessagesForEstimate();
+    const messages = scanResult.messages;
     const text = messages.map((message) => message.text).join("\n\n");
     const estimate = estimateTokens(text, { messageCount: messages.length });
+    const roleSummary = estimateMessageRoles(messages);
     const mediaEstimate = await estimateVisibleMediaSafely(contextWindowValue);
     const selectedContextWindow = sanitizeContextWindow(contextWindowValue);
     const estimatedVisibleTokens = estimate.tokens + Number(mediaEstimate.totalTokens || 0);
@@ -1182,6 +1187,15 @@
       mediaError: mediaEstimate.mediaError,
       characters: text.length,
       messages: messages.length,
+      userMessages: roleSummary.user.messages,
+      assistantMessages: roleSummary.assistant.messages,
+      otherMessages: roleSummary.other.messages,
+      userTextTokens: roleSummary.user.tokens,
+      assistantTextTokens: roleSummary.assistant.tokens,
+      otherTextTokens: roleSummary.other.tokens,
+      scanTarget: scanResult.scanInfo.target,
+      scanSteps: scanResult.scanInfo.steps,
+      scanScrollMax: scanResult.scanInfo.scrollMax,
       selectedContextWindow,
       contextWindow: selectedContextWindow,
       conversationKey: getCurrentConversationKey(),
@@ -1207,6 +1221,33 @@
 
     logMessage(`Estimated ${formatNumber(estimatedVisibleTokens)} scanned-page tokens across ${messages.length} messages.`);
     return state.lastEstimate;
+  }
+
+  function estimateMessageRoles(messages) {
+    const groups = {
+      user: [],
+      assistant: [],
+      other: []
+    };
+
+    messages.forEach((message) => {
+      const role = message.role === "user" || message.role === "assistant" ? message.role : "other";
+      groups[role].push(message.text);
+    });
+
+    return {
+      user: estimateRoleGroup(groups.user),
+      assistant: estimateRoleGroup(groups.assistant),
+      other: estimateRoleGroup(groups.other)
+    };
+  }
+
+  function estimateRoleGroup(texts) {
+    const text = texts.join("\n\n");
+    return {
+      messages: texts.length,
+      tokens: text ? estimateTokens(text, { messageCount: texts.length }).tokens : 0
+    };
   }
 
   async function estimateVisibleMediaSafely(contextWindowValue) {
@@ -1773,36 +1814,54 @@
     const scrollTarget = findConversationScrollTarget();
     const originalPosition = getScrollPosition(scrollTarget);
     const messageMap = new Map();
+    const scanInfo = {
+      target: describeScrollTarget(scrollTarget),
+      steps: 0,
+      scrollMax: getScrollMax(scrollTarget)
+    };
 
     collectCurrentMessages(messageMap);
 
     if (!scrollTarget || getScrollMax(scrollTarget) <= 0) {
-      return Array.from(messageMap.values());
+      return {
+        messages: Array.from(messageMap.values()),
+        scanInfo
+      };
     }
 
     try {
       await setScrollPosition(scrollTarget, 0);
+      scanInfo.steps += 1;
+      scanInfo.scrollMax = Math.max(scanInfo.scrollMax, getScrollMax(scrollTarget));
       collectCurrentMessages(messageMap);
 
-      const maxSteps = 36;
-      let previousPosition = -1;
+      const maxSteps = getMaxScanSteps(scrollTarget);
       for (let step = 0; step < maxSteps; step += 1) {
         const currentPosition = getScrollPosition(scrollTarget);
         const maxScroll = getScrollMax(scrollTarget);
-        if (currentPosition >= maxScroll - 4 || Math.abs(currentPosition - previousPosition) < 2) {
+        scanInfo.scrollMax = Math.max(scanInfo.scrollMax, maxScroll);
+
+        if (currentPosition >= maxScroll - 4) {
           break;
         }
 
-        previousPosition = currentPosition;
         const nextPosition = Math.min(currentPosition + getScrollPageSize(scrollTarget), maxScroll);
+        if (Math.abs(nextPosition - currentPosition) < 2) {
+          break;
+        }
+
         await setScrollPosition(scrollTarget, nextPosition);
+        scanInfo.steps += 1;
         collectCurrentMessages(messageMap);
       }
     } finally {
       await setScrollPosition(scrollTarget, originalPosition);
     }
 
-    return Array.from(messageMap.values());
+    return {
+      messages: Array.from(messageMap.values()),
+      scanInfo
+    };
   }
 
   function collectCurrentMessages(messageMap) {
@@ -1815,25 +1874,129 @@
   }
 
   function findConversationScrollTarget() {
-    const main = document.querySelector("main");
-    const candidates = [];
+    const main = document.querySelector("main") || document.body;
+    const currentMessages = Array.from(main.querySelectorAll(getMessageCandidateSelector()))
+      .filter((element) => !isInsideExtensionUi(element) && isRenderedElement(element));
+    const candidates = collectScrollCandidates(main, currentMessages);
+    let best = null;
+    let bestScore = -1;
+
+    candidates.forEach((candidate) => {
+      const score = scoreScrollCandidate(candidate, currentMessages, main);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    });
+
+    return best || document.scrollingElement || document.documentElement;
+  }
+
+  function collectScrollCandidates(main, messages) {
+    const candidates = new Set([
+      document.scrollingElement,
+      document.documentElement,
+      document.body,
+      main
+    ].filter(Boolean));
+
     let node = main;
-    while (node && node !== document.body && candidates.length < 8) {
-      candidates.push(node);
+    while (node && node !== document.body && candidates.size < 8) {
+      candidates.add(node);
       node = node.parentElement;
     }
 
-    candidates.push(document.scrollingElement || document.documentElement);
-
-    return candidates.find((candidate) => {
-      if (!candidate) {
-        return false;
+    messages.slice(0, 80).forEach((message) => {
+      let ancestor = message;
+      for (let depth = 0; ancestor && depth < 12; depth += 1) {
+        candidates.add(ancestor);
+        ancestor = ancestor.parentElement;
       }
-      const style = candidate === document.scrollingElement ? null : window.getComputedStyle(candidate);
-      const canScroll = candidate.scrollHeight > candidate.clientHeight + 120;
-      const overflowAllowsScroll = !style || /(auto|scroll|overlay)/i.test(`${style.overflowY} ${style.overflow}`);
-      return canScroll && overflowAllowsScroll;
-    }) || document.scrollingElement || document.documentElement;
+    });
+
+    Array.from(main.querySelectorAll("*")).forEach((element) => {
+      if (isPotentialScrollTarget(element)) {
+        candidates.add(element);
+      }
+    });
+
+    return Array.from(candidates).filter(Boolean);
+  }
+
+  function isPotentialScrollTarget(element) {
+    if (!element || !(element instanceof Element) || isInsideExtensionUi(element)) {
+      return false;
+    }
+
+    if (getScrollMax(element) < 80) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function scoreScrollCandidate(candidate, messages, main) {
+    const maxScroll = getScrollMax(candidate);
+    if (!candidate || maxScroll < 80) {
+      return -1;
+    }
+
+    const containsMessages = messages.filter((message) => candidate === message || candidate.contains(message)).length;
+    const containsMain = candidate === main || candidate.contains(main) || main.contains(candidate);
+    if (!containsMessages && !containsMain) {
+      return -1;
+    }
+
+    const isDocumentScroller = candidate === document.scrollingElement ||
+      candidate === document.documentElement ||
+      candidate === document.body;
+    const style = isDocumentScroller ? null : window.getComputedStyle(candidate);
+    const overflowText = style ? `${style.overflowY} ${style.overflow}` : "auto";
+    const overflowBonus = /(auto|scroll|overlay)/i.test(overflowText) ? 1000 : 0;
+    const rect = getScrollTargetRect(candidate);
+    const viewportOverlap = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+    const sizeBonus = Math.min(800, viewportOverlap);
+
+    // Prefer the actual message scroll container over document/body when both
+    // technically contain the same messages.
+    const documentPenalty = isDocumentScroller ? 250 : 0;
+    return (containsMessages * 10000) + overflowBonus + sizeBonus + Math.min(maxScroll, 50000) / 10 - documentPenalty;
+  }
+
+  function getScrollTargetRect(target) {
+    if (!target || target === document.scrollingElement || target === document.documentElement || target === document.body) {
+      return {
+        top: 0,
+        bottom: window.innerHeight,
+        height: window.innerHeight
+      };
+    }
+
+    return target.getBoundingClientRect();
+  }
+
+  function describeScrollTarget(target) {
+    if (!target) {
+      return "none";
+    }
+
+    if (target === document.scrollingElement || target === document.documentElement || target === document.body) {
+      return "document";
+    }
+
+    const tag = target.tagName ? target.tagName.toLowerCase() : "element";
+    const role = target.getAttribute("role");
+    const testId = target.getAttribute("data-testid");
+    const label = target.getAttribute("aria-label");
+    const pieces = [tag, role && `[role="${role}"]`, testId && `[data-testid="${testId}"]`, label && `[aria-label="${label}"]`];
+    return pieces.filter(Boolean).join("");
+  }
+
+  function getMaxScanSteps(target) {
+    const maxScroll = getScrollMax(target);
+    const pageSize = getScrollPageSize(target);
+    return Math.min(140, Math.max(12, Math.ceil(maxScroll / Math.max(pageSize, 320)) + 4));
   }
 
   function getScrollPosition(target) {
@@ -1864,11 +2027,13 @@
   async function setScrollPosition(target, position) {
     if (!target || target === document.scrollingElement || target === document.documentElement || target === document.body) {
       window.scrollTo({ top: position, behavior: "auto" });
+      window.dispatchEvent(new Event("scroll"));
     } else {
       target.scrollTop = position;
+      target.dispatchEvent(new Event("scroll", { bubbles: true }));
     }
 
-    await sleep(140);
+    await sleep(240);
   }
 
   function getVisibleMessages() {
@@ -1891,9 +2056,43 @@
     }
 
     return dedupeMessageElements(elements)
-      .map((element) => extractReadableText(element))
-      .filter(Boolean)
-      .map((text) => ({ text }));
+      .map((element) => ({
+        text: extractReadableText(element),
+        role: getMessageRole(element)
+      }))
+      .filter((message) => Boolean(message.text));
+  }
+
+  function getMessageCandidateSelector() {
+    return [
+      "[data-message-author-role]",
+      '[data-testid^="conversation-turn"]',
+      "article",
+      ".markdown, [class*='markdown']"
+    ].join(",");
+  }
+
+  function getMessageRole(element) {
+    const explicitRole = cleanText(element.getAttribute("data-message-author-role")).toLowerCase();
+    if (explicitRole === "user" || explicitRole === "assistant") {
+      return explicitRole;
+    }
+
+    const label = cleanText([
+      element.getAttribute("aria-label"),
+      element.getAttribute("data-testid"),
+      element.getAttribute("class")
+    ].filter(Boolean).join(" ")).toLowerCase();
+
+    if (/(assistant|chatgpt|gpt|model)/i.test(label)) {
+      return "assistant";
+    }
+
+    if (/(user|you|human)/i.test(label)) {
+      return "user";
+    }
+
+    return "other";
   }
 
   function dedupeMessageElements(elements) {
