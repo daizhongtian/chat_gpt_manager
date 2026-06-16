@@ -1154,7 +1154,7 @@
   }
 
   async function estimateVisibleContext(contextWindowValue) {
-    const messages = getVisibleMessages();
+    const messages = await collectConversationMessagesForEstimate();
     const text = messages.map((message) => message.text).join("\n\n");
     const estimate = estimateTokens(text, { messageCount: messages.length });
     const mediaEstimate = await estimateVisibleMediaSafely(contextWindowValue);
@@ -1202,10 +1202,10 @@
       punctuationCount: estimate.punctuationCount,
       tokenizerUsed: estimate.tokenizerUsed,
       tokenizerError: estimate.tokenizerError,
-      warning: "Loaded page content only. This is not the real model backend context."
+      warning: "Scanned loaded page content only. This is not the real model backend context."
     };
 
-    logMessage(`Estimated ${formatNumber(estimatedVisibleTokens)} loaded-page tokens across ${messages.length} messages.`);
+    logMessage(`Estimated ${formatNumber(estimatedVisibleTokens)} scanned-page tokens across ${messages.length} messages.`);
     return state.lastEstimate;
   }
 
@@ -1767,6 +1767,108 @@
     } finally {
       window.clearTimeout(timeout);
     }
+  }
+
+  async function collectConversationMessagesForEstimate() {
+    const scrollTarget = findConversationScrollTarget();
+    const originalPosition = getScrollPosition(scrollTarget);
+    const messageMap = new Map();
+
+    collectCurrentMessages(messageMap);
+
+    if (!scrollTarget || getScrollMax(scrollTarget) <= 0) {
+      return Array.from(messageMap.values());
+    }
+
+    try {
+      await setScrollPosition(scrollTarget, 0);
+      collectCurrentMessages(messageMap);
+
+      const maxSteps = 36;
+      let previousPosition = -1;
+      for (let step = 0; step < maxSteps; step += 1) {
+        const currentPosition = getScrollPosition(scrollTarget);
+        const maxScroll = getScrollMax(scrollTarget);
+        if (currentPosition >= maxScroll - 4 || Math.abs(currentPosition - previousPosition) < 2) {
+          break;
+        }
+
+        previousPosition = currentPosition;
+        const nextPosition = Math.min(currentPosition + getScrollPageSize(scrollTarget), maxScroll);
+        await setScrollPosition(scrollTarget, nextPosition);
+        collectCurrentMessages(messageMap);
+      }
+    } finally {
+      await setScrollPosition(scrollTarget, originalPosition);
+    }
+
+    return Array.from(messageMap.values());
+  }
+
+  function collectCurrentMessages(messageMap) {
+    getVisibleMessages().forEach((message) => {
+      const key = cleanText(message.text).slice(0, 500);
+      if (key && !messageMap.has(key)) {
+        messageMap.set(key, message);
+      }
+    });
+  }
+
+  function findConversationScrollTarget() {
+    const main = document.querySelector("main");
+    const candidates = [];
+    let node = main;
+    while (node && node !== document.body && candidates.length < 8) {
+      candidates.push(node);
+      node = node.parentElement;
+    }
+
+    candidates.push(document.scrollingElement || document.documentElement);
+
+    return candidates.find((candidate) => {
+      if (!candidate) {
+        return false;
+      }
+      const style = candidate === document.scrollingElement ? null : window.getComputedStyle(candidate);
+      const canScroll = candidate.scrollHeight > candidate.clientHeight + 120;
+      const overflowAllowsScroll = !style || /(auto|scroll|overlay)/i.test(`${style.overflowY} ${style.overflow}`);
+      return canScroll && overflowAllowsScroll;
+    }) || document.scrollingElement || document.documentElement;
+  }
+
+  function getScrollPosition(target) {
+    if (!target || target === document.scrollingElement || target === document.documentElement || target === document.body) {
+      return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+    }
+
+    return target.scrollTop || 0;
+  }
+
+  function getScrollMax(target) {
+    if (!target || target === document.scrollingElement || target === document.documentElement || target === document.body) {
+      const root = document.scrollingElement || document.documentElement;
+      return Math.max(0, root.scrollHeight - window.innerHeight);
+    }
+
+    return Math.max(0, target.scrollHeight - target.clientHeight);
+  }
+
+  function getScrollPageSize(target) {
+    if (!target || target === document.scrollingElement || target === document.documentElement || target === document.body) {
+      return Math.max(320, Math.floor(window.innerHeight * 0.85));
+    }
+
+    return Math.max(320, Math.floor(target.clientHeight * 0.85));
+  }
+
+  async function setScrollPosition(target, position) {
+    if (!target || target === document.scrollingElement || target === document.documentElement || target === document.body) {
+      window.scrollTo({ top: position, behavior: "auto" });
+    } else {
+      target.scrollTop = position;
+    }
+
+    await sleep(140);
   }
 
   function getVisibleMessages() {

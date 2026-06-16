@@ -92,7 +92,7 @@
     }
 
     setBusy(true);
-    elements.estimateOutput.textContent = "Estimating loaded context...";
+    elements.estimateOutput.textContent = "Scanning conversation context...";
 
     try {
       const selectedContextWindow = Number(elements.contextWindow.value || 128000);
@@ -395,23 +395,23 @@
     const selectedContextWindow = Number(adjustedEstimate.selectedContextWindow || adjustedEstimate.contextWindow || 128000);
     const methodLabel = formatEstimatorMethod(adjustedEstimate);
     elements.estimateOutput.innerHTML = `
-      <div class="metric"><span>Estimated visible tokens</span><strong>${formatNumber(estimatedVisibleTokens)}</strong></div>
+      <div class="metric"><span>Estimated scanned tokens</span><strong>${formatNumber(estimatedVisibleTokens)}</strong></div>
       ${renderVisibleTextBlock(adjustedEstimate)}
       ${renderCountedAttachments(adjustedEstimate.countedAttachments)}
       ${renderMissingAttachments(adjustedEstimate.missingAttachments)}
       ${renderEstimateWarnings(adjustedEstimate)}
       <div class="metric"><span>Estimator</span><strong>${escapeHtml(methodLabel)}</strong></div>
-      <div class="meter" aria-label="Approximate loaded-page context usage">
+      <div class="meter" aria-label="Approximate scanned-page context usage">
         <div class="meter-fill" style="width: ${Math.min(percentage, 100).toFixed(2)}%"></div>
       </div>
-      <div class="warning">${percentage.toFixed(2)}% of selected ${formatNumber(selectedContextWindow)} token window. Loaded page only, not backend context.</div>
+      <div class="warning">${percentage.toFixed(2)}% of selected ${formatNumber(selectedContextWindow)} token window. Scanned page only, not backend context.</div>
     `;
   }
 
   function renderVisibleTextBlock(estimate) {
     return `
       <div class="estimate-panel">
-        <h3>Visible conversation text</h3>
+        <h3>Scanned conversation text</h3>
         <strong>${formatNumber(estimate.textTokens || 0)} estimated tokens</strong>
         <span>${formatNumber(estimate.characters)} characters | ${formatNumber(estimate.messages)} messages</span>
       </div>
