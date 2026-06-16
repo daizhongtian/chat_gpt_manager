@@ -18,7 +18,7 @@
       top: 0;
       z-index: 5;
       display: grid;
-      grid-template-columns: repeat(10, auto) 1fr;
+      grid-template-columns: repeat(12, auto) 1fr;
       align-items: center;
       gap: 8px;
       border-bottom: 1px solid #dcdfe4;
@@ -207,6 +207,8 @@
     <button type="button" id="test-read-usage">Read Usage</button>
     <button type="button" id="test-use-gpt">Use GPT</button>
     <button type="button" id="test-use-pro">Use GPT Pro</button>
+    <button type="button" id="test-disable-extension">Disable extension</button>
+    <button type="button" id="test-enable-extension">Enable extension</button>
     <label>
       <span class="sr-only">Context window</span>
       <select id="test-window">
@@ -430,6 +432,18 @@
 
     document.getElementById("test-use-pro").addEventListener("click", () => {
       setMockModel("GPT-5 Pro");
+    });
+
+    document.getElementById("test-disable-extension").addEventListener("click", async () => {
+      const api = await getApi();
+      api.setExtensionEnabled(false);
+      showStatus("Extension disabled");
+    });
+
+    document.getElementById("test-enable-extension").addEventListener("click", async () => {
+      const api = await getApi();
+      api.setExtensionEnabled(true);
+      showStatus("Extension enabled");
     });
 
     if (new URLSearchParams(location.search).has("autoEstimate")) {
