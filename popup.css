@@ -184,6 +184,27 @@ button:disabled {
   gap: 7px;
 }
 
+.attachment-more {
+  display: grid;
+  gap: 7px;
+}
+
+.attachment-more summary {
+  width: max-content;
+  cursor: pointer;
+  border: 1px solid #d6d6d6;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: #f7f7f7;
+  color: #171717;
+  font-size: 12px;
+  list-style-position: inside;
+}
+
+.attachment-more[open] summary {
+  margin-bottom: 7px;
+}
+
 .attachment-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -332,6 +353,12 @@ button:disabled {
 
   .attachment-item {
     border-color: #3a3a3a;
+  }
+
+  .attachment-more summary {
+    border-color: #454545;
+    background: #2f2f2f;
+    color: #f3f3f3;
   }
 
   .usage-category-row {

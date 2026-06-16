@@ -427,18 +427,7 @@
     return `
       <div class="estimate-panel">
         <h3>Counted attachments</h3>
-        <div class="attachment-list">
-          ${items.map((attachment) => `
-            <div class="attachment-item counted-attachment">
-              <div>
-                <strong>${escapeHtml(attachment.name || "Attachment")}</strong>
-                <span>Source: ${escapeHtml(attachment.source || "Visible page attachment")}</span>
-                ${renderAttachmentDetails(attachment)}
-              </div>
-              <b>${formatNumber(attachment.tokens)} estimated tokens</b>
-            </div>
-          `).join("")}
-        </div>
+        ${renderCollapsibleAttachmentList(items, renderCountedAttachment)}
       </div>
     `;
   }
@@ -455,16 +444,50 @@
           <h3>Missing attachments</h3>
           <button type="button" class="small-button" data-action="add-local-pdfs">Add local PDFs</button>
         </div>
-        <div class="attachment-list">
-          ${items.map((attachment) => `
-            <div class="attachment-item missing-attachment">
-              <div>
-                <strong>${escapeHtml(attachment.name || "PDF file")}</strong>
-                <span>Status: ${escapeHtml(attachment.status || "Not counted")}</span>
-                <span>Reason: ${escapeHtml(attachment.reason || "File content is not available to the browser.")}</span>
-              </div>
-            </div>
-          `).join("")}
+        ${renderCollapsibleAttachmentList(items, renderMissingAttachment)}
+      </div>
+    `;
+  }
+
+  function renderCollapsibleAttachmentList(items, renderItem) {
+    const visibleItems = items.slice(0, 3);
+    const hiddenItems = items.slice(3);
+
+    return `
+      <div class="attachment-list">
+        ${visibleItems.map(renderItem).join("")}
+      </div>
+      ${hiddenItems.length ? `
+        <details class="attachment-more">
+          <summary>More (${formatNumber(hiddenItems.length)})</summary>
+          <div class="attachment-list">
+            ${hiddenItems.map(renderItem).join("")}
+          </div>
+        </details>
+      ` : ""}
+    `;
+  }
+
+  function renderCountedAttachment(attachment) {
+    return `
+      <div class="attachment-item counted-attachment">
+        <div>
+          <strong>${escapeHtml(attachment.name || "Attachment")}</strong>
+          <span>Source: ${escapeHtml(attachment.source || "Visible page attachment")}</span>
+          ${renderAttachmentDetails(attachment)}
+        </div>
+        <b>${formatNumber(attachment.tokens)} estimated tokens</b>
+      </div>
+    `;
+  }
+
+  function renderMissingAttachment(attachment) {
+    return `
+      <div class="attachment-item missing-attachment">
+        <div>
+          <strong>${escapeHtml(attachment.name || "PDF file")}</strong>
+          <span>Status: ${escapeHtml(attachment.status || "Not counted")}</span>
+          <span>Reason: ${escapeHtml(attachment.reason || "File content is not available to the browser.")}</span>
         </div>
       </div>
     `;
