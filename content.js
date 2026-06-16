@@ -12,6 +12,7 @@
   const PDF_AUTO_ANALYSIS_LIMIT_BYTES = 20 * 1024 * 1024;
   const PDF_AUTO_ANALYSIS_LIMIT = 3;
   const USAGE_STORAGE_KEY = "ccmUsageStats";
+  const SETTINGS_STORAGE_KEY = "ccmSettings";
   const DEFAULT_MODEL_LABEL = "Unknown model";
 
   const state = {
@@ -29,13 +30,68 @@
     lastUsageSignature: "",
     lastUsageStartedAt: 0,
     lastComposerActivityAt: 0,
+    extensionEnabled: true,
     memoryUsageStats: createEmptyUsageStats()
   };
 
   function init() {
+    installSettingsSync();
     installMessageBridge();
     installUsageTracking();
     exposeTestApi();
+  }
+
+  function installSettingsSync() {
+    readExtensionSettings()
+      .then(applyExtensionSettings)
+      .catch((error) => logMessage(`Settings read failed: ${error.message}`));
+
+    if (!globalThis.chrome || !chrome.storage || !chrome.storage.onChanged) {
+      return;
+    }
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local" || !changes[SETTINGS_STORAGE_KEY]) {
+        return;
+      }
+
+      applyExtensionSettings(changes[SETTINGS_STORAGE_KEY].newValue || {});
+    });
+  }
+
+  async function readExtensionSettings() {
+    if (!hasChromeStorage()) {
+      return {};
+    }
+
+    return new Promise((resolve) => {
+      chrome.storage.local.get([SETTINGS_STORAGE_KEY], (items) => {
+        const settings = items && items[SETTINGS_STORAGE_KEY];
+        resolve(settings && typeof settings === "object" ? settings : {});
+      });
+    });
+  }
+
+  function applyExtensionSettings(settings) {
+    const wasEnabled = isExtensionEnabled();
+    state.extensionEnabled = !settings || settings.extensionEnabled !== false;
+
+    if (wasEnabled && !state.extensionEnabled) {
+      deactivateConversationTools();
+      window.clearTimeout(state.pendingUsageTimer);
+      state.pendingUsageTimer = null;
+      showToast("ChatGPT Cleaner & Context Viewer is disabled.");
+    }
+  }
+
+  function isExtensionEnabled() {
+    return state.extensionEnabled !== false;
+  }
+
+  function requireExtensionEnabled() {
+    if (!isExtensionEnabled()) {
+      throw new Error("Extension is disabled. Turn it on in the popup to use this action.");
+    }
   }
 
   function installMessageBridge() {
@@ -62,12 +118,20 @@
   async function handlePopupMessage(message) {
     switch (message.type) {
       case "CCM_GET_STATUS":
-        if (state.isActivated) {
+        if (isExtensionEnabled() && state.isActivated) {
           refreshConversationCheckboxes();
         }
         return ok({ status: getStatus() });
 
+      case "CCM_SET_EXTENSION_ENABLED":
+        applyExtensionSettings({ extensionEnabled: message.enabled !== false });
+        return ok({
+          message: isExtensionEnabled() ? "Extension enabled." : "Extension disabled.",
+          status: getStatus()
+        });
+
       case "CCM_SELECT_CONVERSATIONS":
+        requireExtensionEnabled();
         activateConversationTools();
         showToast("Conversation checkboxes are ready in the sidebar.");
         return ok({
@@ -76,6 +140,7 @@
         });
 
       case "CCM_DESELECT_ALL":
+        requireExtensionEnabled();
         activateConversationTools();
         deselectAllConversations();
         showToast("All selected conversations were cleared.");
@@ -85,6 +150,7 @@
         });
 
       case "CCM_DELETE_SELECTED":
+        requireExtensionEnabled();
         activateConversationTools();
         // Let the page-side progress continue even if the extension popup closes.
         deleteSelectedConversations();
@@ -94,6 +160,7 @@
         });
 
       case "CCM_REFRESH_LIST":
+        requireExtensionEnabled();
         activateConversationTools();
         refreshConversationCheckboxes();
         showToast("Conversation list refreshed.");
@@ -103,12 +170,14 @@
         });
 
       case "CCM_ESTIMATE_CONTEXT":
+        requireExtensionEnabled();
         return ok({
           estimate: await estimateVisibleContext(Number(message.contextWindow)),
           status: getStatus()
         });
 
       case "CCM_RECORD_USAGE_NOW": {
+        requireExtensionEnabled();
         const usageStats = await recordModelUsage("manual-popup");
         return ok({
           message: `Recorded one ${usageStats.lastModelLabel} use.`,
@@ -133,9 +202,29 @@
   }
 
   function activateConversationTools() {
+    requireExtensionEnabled();
     state.isActivated = true;
     refreshConversationCheckboxes();
     installMutationObserver();
+  }
+
+  function deactivateConversationTools() {
+    state.isActivated = false;
+    state.selectedConversationKeys.clear();
+
+    document.querySelectorAll(`.${CHECKBOX_CLASS}`).forEach((checkbox) => {
+      const link = checkbox.closest("a");
+      checkbox.remove();
+      if (link) {
+        link.classList.remove("ccm-enhanced-link");
+        link.removeAttribute(ENHANCED_ATTR);
+      }
+    });
+
+    if (state.observer) {
+      state.observer.disconnect();
+      state.observer = null;
+    }
   }
 
   function installMutationObserver() {
@@ -172,13 +261,13 @@
     });
 
     document.addEventListener("submit", (event) => {
-      if (event.target instanceof Element && isLikelyComposerForm(event.target)) {
+      if (isExtensionEnabled() && event.target instanceof Element && isLikelyComposerForm(event.target)) {
         scheduleUsageRecord("composer-submit", event.target);
       }
     }, true);
 
     document.addEventListener("keydown", (event) => {
-      if (isLikelyComposerEnter(event)) {
+      if (isExtensionEnabled() && isLikelyComposerEnter(event)) {
         scheduleUsageRecord("enter-key", event.target);
       }
     }, true);
@@ -191,6 +280,10 @@
   }
 
   function handlePotentialSendAction(event) {
+    if (!isExtensionEnabled()) {
+      return;
+    }
+
     const target = event.target instanceof Element ? event.target : null;
     const button = target ? target.closest("button,[role='button'],input[type='submit']") : null;
     if (button && isLikelySendButton(button)) {
@@ -367,6 +460,10 @@
   }
 
   function scheduleUsageRecord(reason, sourceElement) {
+    if (!isExtensionEnabled()) {
+      return;
+    }
+
     if (sourceElement && !hasComposerContent(sourceElement)) {
       return;
     }
@@ -393,6 +490,8 @@
   }
 
   async function recordModelUsage(reason, modelLabel) {
+    requireExtensionEnabled();
+
     const label = normalizeModelLabel(modelLabel || detectCurrentModelLabel());
     const category = classifyUsageCategory(label);
     const stats = normalizeUsageStats(await readUsageStats());
@@ -654,6 +753,11 @@
   }
 
   function refreshConversationCheckboxes() {
+    if (!isExtensionEnabled()) {
+      deactivateConversationTools();
+      return 0;
+    }
+
     const links = getConversationLinks();
     let added = 0;
 
@@ -864,6 +968,8 @@
   }
 
   async function deleteSelectedConversations() {
+    requireExtensionEnabled();
+
     if (state.isDeleting) {
       logMessage("Deletion is already running.");
       showToast("Deletion is already running.");
@@ -883,6 +989,11 @@
 
     try {
       for (let index = 0; index < conversations.length; index += 1) {
+        if (!isExtensionEnabled()) {
+          logMessage("Deletion stopped because the extension was disabled.");
+          break;
+        }
+
         const conversation = conversations[index];
         setProgress(`Deleting ${index + 1} / ${conversations.length}: ${conversation.title}`);
 
@@ -909,6 +1020,8 @@
   }
 
   async function deleteConversation(conversation) {
+    requireExtensionEnabled();
+
     const link = findConversationLinkByKey(conversation.key);
     if (!link) {
       throw new Error("Conversation link is no longer visible.");
@@ -1157,6 +1270,8 @@
   }
 
   async function estimateVisibleContext(contextWindowValue) {
+    requireExtensionEnabled();
+
     const scanResult = await collectConversationMessagesForEstimate();
     const messages = scanResult.messages;
     const text = messages.map((message) => message.text).join("\n\n");
@@ -2331,6 +2446,7 @@
     const visible = state.isActivated ? getConversationLinks().length : 0;
     return {
       activated: state.isActivated,
+      extensionEnabled: isExtensionEnabled(),
       isDeleting: state.isDeleting,
       selected: state.selectedConversationKeys.size,
       visible,
@@ -2363,6 +2479,7 @@
       recordModelUsage,
       resetModelUsage,
       readUsageStats,
+      setExtensionEnabled: (enabled) => applyExtensionSettings({ extensionEnabled: enabled !== false }),
       getConversationCount: () => getConversationLinks().length,
       getSelectedConversations,
       getStatus

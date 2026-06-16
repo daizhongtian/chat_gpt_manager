@@ -20,6 +20,7 @@
   });
 
   function cacheElements() {
+    elements.extensionEnabled = byId("extension-enabled");
     elements.select = byId("select-conversations");
     elements.deselect = byId("deselect-all");
     elements.deleteSelected = byId("delete-selected");
@@ -37,6 +38,7 @@
   }
 
   function bindEvents() {
+    elements.extensionEnabled.addEventListener("change", saveExtensionEnabledSetting);
     elements.select.addEventListener("click", () => runAction("CCM_SELECT_CONVERSATIONS"));
     elements.deselect.addEventListener("click", () => runAction("CCM_DESELECT_ALL"));
     elements.deleteSelected.addEventListener("click", () => runAction("CCM_DELETE_SELECTED"));
@@ -55,22 +57,35 @@
       const response = await sendToActiveTab({ type: "CCM_GET_STATUS" });
       renderStatus(response.status);
     } catch (error) {
-      setStatus("Open or refresh https://chatgpt.com/, then try again.");
+      setStatus(isExtensionEnabled()
+        ? "Open or refresh https://chatgpt.com/, then try again."
+        : "Extension disabled. Turn it on to use controls.");
     }
   }
 
   async function loadSettings() {
     try {
       const settings = await readSettings();
+      elements.extensionEnabled.checked = settings.extensionEnabled !== false;
       elements.contextEstimateEnabled.checked = settings.contextEstimateEnabled !== false;
     } catch (error) {
+      elements.extensionEnabled.checked = true;
       elements.contextEstimateEnabled.checked = true;
     }
 
+    applyExtensionAvailability(false);
     applyContextEstimateAvailability(false);
+    if (!isExtensionEnabled()) {
+      setStatus("Extension disabled. Turn it on to use controls.");
+    }
   }
 
   async function runAction(type) {
+    if (!isExtensionEnabled()) {
+      setStatus("Extension is disabled. Turn it on to use controls.");
+      return;
+    }
+
     setBusy(true);
     try {
       const response = await sendToActiveTab({ type });
@@ -86,6 +101,12 @@
   }
 
   async function estimateContext() {
+    if (!isExtensionEnabled()) {
+      elements.estimateOutput.innerHTML = '<div class="warning">Extension is disabled.</div>';
+      setStatus("Extension is disabled. Turn it on to estimate context.");
+      return;
+    }
+
     if (!isContextEstimateEnabled()) {
       elements.estimateOutput.innerHTML = '<div class="warning">Context estimate is turned off.</div>';
       return;
@@ -116,6 +137,7 @@
 
   async function saveContextEstimateSetting() {
     const enabled = isContextEstimateEnabled();
+    applyExtensionAvailability(false);
     applyContextEstimateAvailability(false);
 
     if (!enabled) {
@@ -128,6 +150,35 @@
       await writeSettings(settings);
     } catch (error) {
       // Local file smoke tests do not provide chrome.storage.
+    }
+  }
+
+  async function saveExtensionEnabledSetting() {
+    const enabled = isExtensionEnabled();
+    applyExtensionAvailability(true);
+    applyContextEstimateAvailability(true);
+
+    try {
+      const settings = await readSettings();
+      settings.extensionEnabled = enabled;
+      await writeSettings(settings);
+
+      try {
+        const response = await sendToActiveTab({
+          type: "CCM_SET_EXTENSION_ENABLED",
+          enabled
+        });
+        renderStatus(response.status);
+      } catch (error) {
+        setStatus(enabled ? "Extension enabled. Open or refresh ChatGPT to use it." : "Extension disabled.");
+      }
+    } finally {
+      applyExtensionAvailability(false);
+      applyContextEstimateAvailability(false);
+      if (!enabled) {
+        elements.estimateOutput.innerHTML = '<div class="warning">Extension is disabled.</div>';
+        setStatus("Extension disabled.");
+      }
     }
   }
 
@@ -372,6 +423,13 @@
       return;
     }
 
+    if (status.extensionEnabled === false) {
+      elements.extensionEnabled.checked = false;
+      applyExtensionAvailability(false);
+      setStatus("Extension disabled. Turn it on to use controls.");
+      return;
+    }
+
     const visibleText = status.activated
       ? `${formatNumber(status.selected)} selected / ${formatNumber(status.visible)} visible conversations`
       : "Controls are ready. Selection starts only when you click Select conversations.";
@@ -608,8 +666,29 @@
     return Boolean(elements.contextEstimateEnabled && elements.contextEstimateEnabled.checked);
   }
 
+  function isExtensionEnabled() {
+    return Boolean(elements.extensionEnabled && elements.extensionEnabled.checked);
+  }
+
+  function applyExtensionAvailability(isBusy) {
+    const enabled = isExtensionEnabled();
+    [
+      elements.select,
+      elements.deselect,
+      elements.deleteSelected,
+      elements.refresh,
+      elements.contextEstimateEnabled,
+      elements.localPdfInput,
+      elements.refreshUsage,
+      elements.resetUsage
+    ]
+      .forEach((button) => {
+        button.disabled = isBusy || !enabled;
+      });
+  }
+
   function applyContextEstimateAvailability(isBusy) {
-    const enabled = isContextEstimateEnabled();
+    const enabled = isExtensionEnabled() && isContextEstimateEnabled();
     elements.contextWindow.disabled = isBusy || !enabled;
     elements.estimate.disabled = isBusy || !enabled;
   }
@@ -666,19 +745,7 @@
   }
 
   function setBusy(isBusy) {
-    [
-      elements.select,
-      elements.deselect,
-      elements.deleteSelected,
-      elements.refresh,
-      elements.contextEstimateEnabled,
-      elements.localPdfInput,
-      elements.refreshUsage,
-      elements.resetUsage
-    ]
-      .forEach((button) => {
-        button.disabled = isBusy;
-      });
+    applyExtensionAvailability(isBusy);
     applyContextEstimateAvailability(isBusy);
   }
 
