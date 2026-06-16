@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "ChatGPT Cleaner & Context Meter",
+  "name": "ChatGPT Cleaner & Context Viewer",
   "short_name": "ChatGPT Cleaner",
   "version": "1.0.0",
   "description": "Batch delete visible ChatGPT conversations, estimate visible context usage, and count local model usage.",
@@ -14,7 +14,7 @@
     "https://*.oaiusercontent.com/*"
   ],
   "action": {
-    "default_title": "ChatGPT Cleaner & Context Meter",
+    "default_title": "ChatGPT Cleaner & Context Viewer",
     "default_popup": "popup.html"
   },
   "content_scripts": [

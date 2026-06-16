@@ -1,4 +1,4 @@
-# ChatGPT Cleaner & Context Meter
+# ChatGPT Cleaner & Context Viewer
 
 A small Chrome Manifest V3 extension for `https://chatgpt.com/*`.
 
@@ -17,7 +17,7 @@ The extension is opened from the Chrome extension icon. It does not show a perma
 3. Click **Load unpacked**.
 4. Select this extension folder: `C:\Users\dz164\Desktop\codex\browser plug in`.
 5. Open or refresh `https://chatgpt.com/`.
-6. Click the **ChatGPT Cleaner & Context Meter** extension icon.
+6. Click the **ChatGPT Cleaner & Context Viewer** extension icon.
 
 ## Use
 
