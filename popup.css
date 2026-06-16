@@ -26,7 +26,6 @@ body {
 
 .popup-header p,
 .status,
-.footnote,
 .warning {
   margin: 4px 0 0;
   color: #5f6368;
@@ -315,7 +314,6 @@ button:disabled {
 
   .popup-header p,
   .status,
-  .footnote,
   .warning,
   .usage-subtitle {
     color: #b9b9b9;
