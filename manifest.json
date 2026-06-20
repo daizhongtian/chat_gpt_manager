@@ -23,6 +23,7 @@
         "https://chatgpt.com/*"
       ],
       "js": [
+        "i18n.js",
         "vendor/chatgpt-cleaner-tokenizer.js",
         "vendor/chatgpt-cleaner-pdf-analyzer.js",
         "content.js"

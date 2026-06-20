@@ -30,6 +30,8 @@
     lastUsageSignature: "",
     lastUsageStartedAt: 0,
     lastComposerActivityAt: 0,
+    languagePreference: "auto",
+    language: "en",
     extensionEnabled: true,
     memoryUsageStats: createEmptyUsageStats()
   };
@@ -74,13 +76,21 @@
 
   function applyExtensionSettings(settings) {
     const wasEnabled = isExtensionEnabled();
+    const nextLanguage = settings && Object.prototype.hasOwnProperty.call(settings, "language")
+      ? settings.language
+      : state.languagePreference;
+    setLanguagePreference(nextLanguage || "auto");
     state.extensionEnabled = !settings || settings.extensionEnabled !== false;
 
     if (wasEnabled && !state.extensionEnabled) {
       deactivateConversationTools();
       window.clearTimeout(state.pendingUsageTimer);
       state.pendingUsageTimer = null;
-      showToast("ChatGPT Cleaner & Context Viewer is disabled.");
+      showToast(t("disabledToast"));
+    }
+
+    if (state.isActivated) {
+      refreshConversationCheckboxes();
     }
   }
 
@@ -90,7 +100,7 @@
 
   function requireExtensionEnabled() {
     if (!isExtensionEnabled()) {
-      throw new Error("Extension is disabled. Turn it on in the popup to use this action.");
+      throw new Error(t("actionDisabled"));
     }
   }
 
@@ -126,16 +136,26 @@
       case "CCM_SET_EXTENSION_ENABLED":
         applyExtensionSettings({ extensionEnabled: message.enabled !== false });
         return ok({
-          message: isExtensionEnabled() ? "Extension enabled." : "Extension disabled.",
+          message: isExtensionEnabled() ? t("extensionEnabledStatus") : t("extensionDisabledShort"),
+          status: getStatus()
+        });
+
+      case "CCM_SET_LANGUAGE":
+        setLanguagePreference(message.language || "auto");
+        if (state.isActivated) {
+          refreshConversationCheckboxes();
+        }
+        return ok({
+          message: t("languageUpdated"),
           status: getStatus()
         });
 
       case "CCM_SELECT_CONVERSATIONS":
         requireExtensionEnabled();
         activateConversationTools();
-        showToast("Conversation checkboxes are ready in the sidebar.");
+        showToast(t("checkboxesReady"));
         return ok({
-          message: "Conversation checkboxes are ready in the sidebar.",
+          message: t("checkboxesReady"),
           status: getStatus()
         });
 
@@ -143,9 +163,9 @@
         requireExtensionEnabled();
         activateConversationTools();
         deselectAllConversations();
-        showToast("All selected conversations were cleared.");
+        showToast(t("allSelectionCleared"));
         return ok({
-          message: "Selection cleared.",
+          message: t("selectionCleared"),
           status: getStatus()
         });
 
@@ -155,7 +175,7 @@
         // Let the page-side progress continue even if the extension popup closes.
         deleteSelectedConversations();
         return ok({
-          message: "Deletion started.",
+          message: t("deletionStarted"),
           status: getStatus()
         });
 
@@ -163,9 +183,9 @@
         requireExtensionEnabled();
         activateConversationTools();
         refreshConversationCheckboxes();
-        showToast("Conversation list refreshed.");
+        showToast(t("conversationListRefreshed"));
         return ok({
-          message: "Conversation list refreshed.",
+          message: t("conversationListRefreshed"),
           status: getStatus()
         });
 
@@ -180,7 +200,7 @@
         requireExtensionEnabled();
         const usageStats = await recordModelUsage("manual-popup");
         return ok({
-          message: `Recorded one ${usageStats.lastModelLabel} use.`,
+          message: t("recordedOneUse", { model: usageStats.lastModelLabel }),
           status: getStatus(),
           usageStats
         });
@@ -193,7 +213,7 @@
         });
 
       default:
-        throw new Error("Unknown extension action.");
+        throw new Error(t("unknownAction"));
     }
   }
 
@@ -768,7 +788,7 @@
       if (existing) {
         existing.dataset.ccmKey = key;
         existing.checked = state.selectedConversationKeys.has(key);
-        existing.setAttribute("aria-label", `Select conversation: ${getConversationTitle(link)}`);
+        existing.setAttribute("aria-label", t("selectConversationLabel", { title: getConversationTitle(link) }));
         return;
       }
 
@@ -777,8 +797,8 @@
       checkbox.className = CHECKBOX_CLASS;
       checkbox.dataset.ccmKey = key;
       checkbox.checked = state.selectedConversationKeys.has(key);
-      checkbox.setAttribute("aria-label", `Select conversation: ${getConversationTitle(link)}`);
-      checkbox.title = "Select this conversation";
+      checkbox.setAttribute("aria-label", t("selectConversationLabel", { title: getConversationTitle(link) }));
+      checkbox.title = t("selectThisConversation");
 
       // Prevent checkbox clicks from opening the conversation link underneath it.
       ["click", "mousedown", "mouseup", "keydown"].forEach((eventName) => {
@@ -877,9 +897,9 @@
       link.getAttribute("aria-label") ||
       link.getAttribute("title") ||
       link.textContent ||
-      "Untitled conversation";
+      t("untitledConversation");
 
-    return cleanText(title.replace(/^Select conversation:\s*/i, "")) || "Untitled conversation";
+    return cleanText(title.replace(/^Select conversation:\s*/i, "")) || t("untitledConversation");
   }
 
   function cleanText(text) {
@@ -971,15 +991,15 @@
     requireExtensionEnabled();
 
     if (state.isDeleting) {
-      logMessage("Deletion is already running.");
-      showToast("Deletion is already running.");
+      logMessage(t("deletionAlreadyRunning"));
+      showToast(t("deletionAlreadyRunning"));
       return;
     }
 
     const conversations = getSelectedConversations();
     if (!conversations.length) {
-      logMessage("No conversations selected.");
-      showToast("No conversations selected.");
+      logMessage(t("noConversationsSelected"));
+      showToast(t("noConversationsSelected"));
       return;
     }
 
@@ -990,12 +1010,16 @@
     try {
       for (let index = 0; index < conversations.length; index += 1) {
         if (!isExtensionEnabled()) {
-          logMessage("Deletion stopped because the extension was disabled.");
+          logMessage(t("deletionStoppedDisabled"));
           break;
         }
 
         const conversation = conversations[index];
-        setProgress(`Deleting ${index + 1} / ${conversations.length}: ${conversation.title}`);
+        setProgress(t("deletingProgress", {
+          current: formatNumber(index + 1),
+          total: formatNumber(conversations.length),
+          title: conversation.title
+        }));
 
         try {
           await deleteConversation(conversation);
@@ -1007,7 +1031,11 @@
           logMessage(`Failed: ${conversation.title} - ${error.message}`);
         }
 
-        setProgress(`Deleted ${deleted} / ${conversations.length}. Failures: ${failures.length}.`);
+        setProgress(t("deletedProgress", {
+          deleted: formatNumber(deleted),
+          total: formatNumber(conversations.length),
+          failures: formatNumber(failures.length)
+        }));
         if (index < conversations.length - 1) {
           await sleep(DELETE_DELAY_MS);
         }
@@ -1015,7 +1043,11 @@
     } finally {
       state.isDeleting = false;
       refreshConversationCheckboxes();
-      setProgress(`Finished. Deleted ${deleted} / ${conversations.length}. Failures: ${failures.length}.`);
+      setProgress(t("finishedProgress", {
+        deleted: formatNumber(deleted),
+        total: formatNumber(conversations.length),
+        failures: formatNumber(failures.length)
+      }));
     }
   }
 
@@ -1024,7 +1056,7 @@
 
     const link = findConversationLinkByKey(conversation.key);
     if (!link) {
-      throw new Error("Conversation link is no longer visible.");
+      throw new Error(t("conversationGone"));
     }
 
     const row = findConversationRow(link);
@@ -1034,7 +1066,7 @@
 
     const menuButton = findMenuButton(row || link, link);
     if (!menuButton) {
-      throw new Error("Could not find the conversation menu button.");
+      throw new Error(t("menuButtonMissing"));
     }
 
     logMessage(`Opening menu: ${conversation.title}`);
@@ -1221,7 +1253,7 @@
         }
 
         if (Date.now() - startedAt >= timeoutMs) {
-          reject(new Error("Timed out while waiting for the ChatGPT UI."));
+          reject(new Error(t("timedOutChatgptUi")));
           return;
         }
 
@@ -1331,10 +1363,13 @@
       punctuationCount: estimate.punctuationCount,
       tokenizerUsed: estimate.tokenizerUsed,
       tokenizerError: estimate.tokenizerError,
-      warning: "Scanned loaded page content only. This is not the real model backend context."
+      warning: t("backendWarning")
     };
 
-    logMessage(`Estimated ${formatNumber(estimatedVisibleTokens)} scanned-page tokens across ${messages.length} messages.`);
+    logMessage(t("estimateLog", {
+      tokens: formatNumber(estimatedVisibleTokens),
+      messages: formatNumber(messages.length)
+    }));
     return state.lastEstimate;
   }
 
@@ -1454,9 +1489,9 @@
     return {
       kind: "image",
       key: image.key || `visible-image-${index + 1}`,
-      name: image.alt ? `Image: ${image.alt.slice(0, 42)}` : `Visible image ${index + 1}`,
-      source: "Visible page image",
-      status: "Counted",
+      name: image.alt ? t("visibleImageWithAlt", { alt: image.alt.slice(0, 42) }) : t("visibleImage", { index: formatNumber(index + 1) }),
+      source: t("visiblePageImage"),
+      status: t("counted"),
       tokens,
       width: Math.round(Number(image.width || 0)),
       height: Math.round(Number(image.height || 0))
@@ -1783,9 +1818,9 @@
   }
 
   function extractPdfName(label, href) {
-    const source = cleanText(label) || href || "PDF file";
+    const source = cleanText(label) || href || t("pdfFile");
     const match = source.match(/[^/\\?#\s]+\.pdf/i);
-    return match ? match[0] : "PDF file";
+    return match ? match[0] : t("pdfFile");
   }
 
   function getFetchablePdfUrl(href) {
@@ -1827,8 +1862,8 @@
       if (!pdf.fetchUrl || !analyzer || typeof analyzer.analyzeArrayBuffer !== "function") {
         summary.inaccessiblePdfCount += 1;
         summary.missingAttachments.push(createMissingPdfAttachment(pdf, !pdf.fetchUrl
-          ? "File content is not available to the browser."
-          : "Local PDF analyzer is not available."));
+          ? t("fileContentUnavailable")
+          : t("analyzerUnavailable")));
         continue;
       }
 
@@ -1848,7 +1883,7 @@
         summary.countedAttachments.push(createCountedPdfAttachment(pdf, result));
       } catch (error) {
         summary.inaccessiblePdfCount += 1;
-        summary.missingAttachments.push(createMissingPdfAttachment(pdf, error.message || "PDF could not be analyzed."));
+        summary.missingAttachments.push(createMissingPdfAttachment(pdf, error.message || t("pdfCouldNotAnalyze")));
         logMessage(`PDF estimate failed for ${pdf.name}: ${error.message}`);
       }
     }
@@ -1856,7 +1891,7 @@
     if (pdfs.length > PDF_AUTO_ANALYSIS_LIMIT) {
       summary.inaccessiblePdfCount += pdfs.length - PDF_AUTO_ANALYSIS_LIMIT;
       pdfs.slice(PDF_AUTO_ANALYSIS_LIMIT).forEach((pdf) => {
-        summary.missingAttachments.push(createMissingPdfAttachment(pdf, "Skipped by the automatic PDF analysis limit."));
+        summary.missingAttachments.push(createMissingPdfAttachment(pdf, t("skippedPdfLimit")));
       });
     }
 
@@ -1869,9 +1904,9 @@
     return {
       kind: "pdf",
       key: pdf.key,
-      name: result.fileName || pdf.name || "PDF file",
-      source: "Browser-accessible PDF",
-      status: "Counted",
+      name: result.fileName || pdf.name || t("pdfFile"),
+      source: t("browserAccessiblePdf"),
+      status: t("counted"),
       tokens: textTokens + imageTokens,
       textTokens,
       imageTokens,
@@ -1885,10 +1920,10 @@
     return {
       kind: "pdf",
       key: pdf.key,
-      name: pdf.name || "PDF file",
-      source: "Unavailable PDF",
-      status: "Not counted",
-      reason: reason || "File content is not available to the browser.",
+      name: pdf.name || t("pdfFile"),
+      source: t("unavailablePdf"),
+      status: t("notCounted"),
+      reason: reason || t("fileContentUnavailable"),
       tokens: 0
     };
   }
@@ -1906,17 +1941,17 @@
 
       const response = await fetch(parsedUrl.href, fetchOptions);
       if (!response.ok) {
-        throw new Error(`PDF fetch failed with ${response.status}`);
+        throw new Error(t("pdfFetchFailedStatus", { status: response.status }));
       }
 
       const length = Number(response.headers.get("content-length") || 0);
       if (length > PDF_AUTO_ANALYSIS_LIMIT_BYTES) {
-        throw new Error("PDF is larger than the 20 MB auto-analysis limit.");
+        throw new Error(t("pdfTooLargeAuto"));
       }
 
       const arrayBuffer = await response.arrayBuffer();
       if (arrayBuffer.byteLength > PDF_AUTO_ANALYSIS_LIMIT_BYTES) {
-        throw new Error("PDF is larger than the 20 MB auto-analysis limit.");
+        throw new Error(t("pdfTooLargeAuto"));
       }
 
       return arrayBuffer;
@@ -2464,7 +2499,31 @@
   }
 
   function formatNumber(value) {
-    return new Intl.NumberFormat().format(value);
+    const i18n = getI18n();
+    return i18n && typeof i18n.formatNumber === "function"
+      ? i18n.formatNumber(value, state.language)
+      : new Intl.NumberFormat().format(value);
+  }
+
+  function getI18n() {
+    return globalThis.ChatGPTCleanerI18n || null;
+  }
+
+  function t(key, params = {}) {
+    const i18n = getI18n();
+    return i18n && typeof i18n.t === "function"
+      ? i18n.t(key, params, state.language)
+      : key;
+  }
+
+  function setLanguagePreference(language) {
+    const i18n = getI18n();
+    state.languagePreference = i18n && typeof i18n.normalizeLanguage === "function"
+      ? i18n.normalizeLanguage(language || "auto")
+      : "en";
+    state.language = i18n && typeof i18n.resolveLanguage === "function"
+      ? i18n.resolveLanguage(state.languagePreference)
+      : state.languagePreference;
   }
 
   function exposeTestApi() {
@@ -2480,6 +2539,8 @@
       resetModelUsage,
       readUsageStats,
       setExtensionEnabled: (enabled) => applyExtensionSettings({ extensionEnabled: enabled !== false }),
+      setLanguage: setLanguagePreference,
+      getLanguage: () => state.language,
       getConversationCount: () => getConversationLinks().length,
       getSelectedConversations,
       getStatus

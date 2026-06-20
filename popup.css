@@ -76,6 +76,7 @@ select {
   background: #f7f7f7;
   color: #171717;
   font: inherit;
+  padding-inline: 8px;
 }
 
 .hidden,

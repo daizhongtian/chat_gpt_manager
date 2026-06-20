@@ -2,11 +2,12 @@
 
 A small Chrome Manifest V3 extension for `https://chatgpt.com/*`.
 
-It has three focused features:
+It has four focused features:
 
 - Batch delete selected visible ChatGPT conversations from the left sidebar.
 - Estimate the token/context usage of the loaded messages on the current conversation page.
 - Count local ChatGPT message sends by visible model label, such as `ChatGPT Pro`.
+- Let the user choose the extension interface language.
 
 The extension is opened from the Chrome extension icon. It does not show a permanent floating toolbar on the ChatGPT page.
 
@@ -15,11 +16,17 @@ The extension is opened from the Chrome extension icon. It does not show a perma
 1. Open `chrome://extensions`.
 2. Enable **Developer Mode**.
 3. Click **Load unpacked**.
-4. Select this extension folder: `C:\Users\dz164\Desktop\codex\browser plug in`.
+4. Select this extension folder: `C:\Users\14660\OneDrive\Desktop\my project\chrome plug in`.
 5. Open or refresh `https://chatgpt.com/`.
 6. Click the **ChatGPT Cleaner & Context Viewer** extension icon.
 
 ## Use
+
+### Interface language
+
+Use **Interface language** in the popup to choose the extension UI language. The setting affects the popup and the extension messages shown on the ChatGPT page.
+
+Current options: Auto, English, Simplified Chinese, Traditional Chinese, Spanish, French, German, Japanese, Korean, Portuguese, Italian, Russian, Arabic, and Hindi.
 
 ### Select conversations
 
@@ -96,6 +103,7 @@ Usage counts start after the extension is installed and loaded. The extension ca
 ## Files
 
 - `manifest.json` declares the Manifest V3 extension, popup, and ChatGPT content script match.
+- `i18n.js` contains the local language options and translation helpers used by the popup and content script.
 - `popup.html`, `popup.css`, and `popup.js` provide the Chrome extension popup controls.
 - `content.js` handles sidebar checkboxes, deletion flow, MutationObserver refresh, local context estimation, and local usage counting.
 - `styles.css` styles only the temporary page-side checkbox, confirmation dialog, and progress toast.
@@ -110,4 +118,4 @@ This does not delete real ChatGPT conversations. It only tests the UI flow again
 1. Open a terminal in this folder.
 2. Run `python -m http.server 8765 --bind 127.0.0.1`.
 3. Open `http://127.0.0.1:8765/tests/smoke.html`.
-4. Test **Select conversations**, **Deselect all**, **Estimate Context**, **Record Usage**, and **Delete selected**.
+4. Test **Select conversations**, **Deselect all**, **Estimate Context**, **Record Usage**, **Apply Language**, and **Delete selected**.

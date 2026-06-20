@@ -18,7 +18,7 @@
       top: 0;
       z-index: 5;
       display: grid;
-      grid-template-columns: repeat(12, auto) 1fr;
+      grid-template-columns: repeat(14, auto) 1fr;
       align-items: center;
       gap: 8px;
       border-bottom: 1px solid #dcdfe4;
@@ -210,6 +210,11 @@
     <button type="button" id="test-disable-extension">Disable extension</button>
     <button type="button" id="test-enable-extension">Enable extension</button>
     <label>
+      <span class="sr-only">Interface language</span>
+      <select id="test-language"></select>
+    </label>
+    <button type="button" id="test-apply-language">Apply Language</button>
+    <label>
       <span class="sr-only">Context window</span>
       <select id="test-window">
         <option value="16000">16K</option>
@@ -334,6 +339,7 @@
 
     document.getElementById("mock-readable-pdf").href = createMockPdfBlobUrl();
   </script>
+  <script src="../i18n.js"></script>
   <script src="../vendor/chatgpt-cleaner-tokenizer.js"></script>
   <script src="../vendor/chatgpt-cleaner-pdf-analyzer.js"></script>
   <script>
@@ -359,6 +365,10 @@
 
     function showStatus(message) {
       status.textContent = message;
+    }
+
+    if (window.ChatGPTCleanerI18n) {
+      window.ChatGPTCleanerI18n.populateLanguageSelect(document.getElementById("test-language"), "auto");
     }
 
     function formatUsageStatus(stats) {
@@ -444,6 +454,13 @@
       const api = await getApi();
       api.setExtensionEnabled(true);
       showStatus("Extension enabled");
+    });
+
+    document.getElementById("test-apply-language").addEventListener("click", async () => {
+      const api = await getApi();
+      const language = document.getElementById("test-language").value;
+      api.setLanguage(language);
+      showStatus(`Language set: ${api.getLanguage()}`);
     });
 
     if (new URLSearchParams(location.search).has("autoEstimate")) {
