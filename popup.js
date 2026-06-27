@@ -777,7 +777,7 @@
         total: Number(value.total || 0),
         lastUsedAt: value.lastUsedAt || ""
       }))
-      .filter((item) => item.total > 0)
+      .filter((item) => item.total > 0 && isKnownUsageModelLabel(item.label))
       .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
 
     elements.usageOutput.innerHTML = `
@@ -800,8 +800,13 @@
             </div>
           `).join("")}
         </div>
-      ` : `<div class="warning">${escapeHtml(t("noUsageYet"))}</div>`}
+      ` : usage.total > 0 ? "" : `<div class="warning">${escapeHtml(t("noUsageYet"))}</div>`}
     `;
+  }
+
+  function isKnownUsageModelLabel(label) {
+    const source = String(label || "").trim();
+    return Boolean(source) && !/^unknown model$/i.test(source);
   }
 
   function setStatus(message) {
