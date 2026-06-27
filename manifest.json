@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ChatGPT Cleaner & Context Viewer",
   "short_name": "ChatGPT Cleaner",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Batch delete visible ChatGPT conversations, estimate visible context usage, and count local model usage.",
   "minimum_chrome_version": "114",
   "permissions": [
