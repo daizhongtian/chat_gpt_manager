@@ -1176,12 +1176,7 @@ function isLittleEndian() {
   return view32[0] === 1;
 }
 function isEvalSupported() {
-  try {
-    new Function("");
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 class FeatureTest {
   static get isLittleEndian() {
@@ -38020,12 +38015,6 @@ class PDFFunction {
     const lexer = new _ps_parser.PostScriptLexer(fn);
     const parser = new _ps_parser.PostScriptParser(lexer);
     const code = parser.parse();
-    if (isEvalSupported && _util.FeatureTest.isEvalSupported) {
-      const compiled = new PostScriptCompiler().compile(code, domain, range);
-      if (compiled) {
-        return new Function("src", "srcOffset", "dest", "destOffset", compiled);
-      }
-    }
     (0, _util.info)("Unable to compile PS function");
     const numOutputs = range.length >> 1;
     const numInputs = domain.length >> 1;

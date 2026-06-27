@@ -599,12 +599,7 @@ var ChatGPTCleanerPdfAnalyzerBundle = (() => {
                   return view32[0] === 1;
                 }
                 function isEvalSupported() {
-                  try {
-                    new Function("");
-                    return true;
-                  } catch {
-                    return false;
-                  }
+                  return false;
                 }
                 class FeatureTest {
                   static get isLittleEndian() {
@@ -1840,8 +1835,7 @@ var ChatGPTCleanerPdfAnalyzerBundle = (() => {
                     return base.origin === other.origin;
                   };
                   PDFWorkerUtil.createCDNWrapper = function(url) {
-                    const wrapper = `importScripts("${url}");`;
-                    return URL.createObjectURL(new Blob([wrapper]));
+                    throw new Error("Cross-origin PDF worker wrappers are disabled in this extension build.");
                   };
                 }
                 class PDFWorker {
@@ -1893,8 +1887,8 @@ var ChatGPTCleanerPdfAnalyzerBundle = (() => {
                         workerSrc
                       } = PDFWorker;
                       try {
-                        if (!PDFWorkerUtil.isSameOrigin(window.location.href, workerSrc)) {
-                          workerSrc = PDFWorkerUtil.createCDNWrapper(new URL(workerSrc, window.location).href);
+                        if (!PDFWorkerUtil.isSameOrigin(window.location.href, workerSrc) && !String(workerSrc).startsWith("chrome-extension://")) {
+                          PDFWorkerUtil.createCDNWrapper(new URL(workerSrc, window.location).href);
                         }
                         const worker2 = new Worker(workerSrc);
                         const messageHandler = new _message_handler.MessageHandler("main", "worker", worker2);
@@ -2035,8 +2029,7 @@ var ChatGPTCleanerPdfAnalyzerBundle = (() => {
                         return mainWorkerMessageHandler;
                       }
                       if (_util.isNodeJS && typeof __require === "function") {
-                        const worker = eval("require")(this.workerSrc);
-                        return worker.WorkerMessageHandler;
+                        throw new Error("Node PDF worker loading is disabled in this extension build.");
                       }
                       await (0, _display_utils.loadScript)(this.workerSrc);
                       return window.pdfjsWorker.WorkerMessageHandler;
@@ -6224,14 +6217,6 @@ var ChatGPTCleanerPdfAnalyzerBundle = (() => {
                       (0, _util2.warn)(`getPathGenerator - ignoring character: "${ex}".`);
                       return this.compiledGlyphs[character] = function(c, size) {
                       };
-                    }
-                    if (this.isEvalSupported && _util2.FeatureTest.isEvalSupported) {
-                      const jsBuf = [];
-                      for (const current of cmds) {
-                        const args = current.args !== void 0 ? current.args.join(",") : "";
-                        jsBuf.push("c.", current.cmd, "(", args, ");\n");
-                      }
-                      return this.compiledGlyphs[character] = new Function("c", "size", jsBuf.join(""));
                     }
                     return this.compiledGlyphs[character] = function(c, size) {
                       for (const current of cmds) {
