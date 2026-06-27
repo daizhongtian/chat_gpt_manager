@@ -10,16 +10,22 @@
   let localPdfEstimates = [];
   let pendingMissingAttachment = null;
   let activeLocalPdfStorageKey = "";
+  let currentLanguagePreference = "auto";
+  let currentLanguage = "en";
+  let lastStatus = null;
+  let lastUsageStats = null;
 
-  document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", async () => {
     cacheElements();
+    populateLanguageOptions();
     bindEvents();
-    loadSettings();
+    await loadSettings();
     refreshStatus();
     refreshUsageStats();
   });
 
   function cacheElements() {
+    elements.language = byId("language-select");
     elements.extensionEnabled = byId("extension-enabled");
     elements.select = byId("select-conversations");
     elements.deselect = byId("deselect-all");
@@ -38,6 +44,7 @@
   }
 
   function bindEvents() {
+    elements.language.addEventListener("change", saveLanguageSetting);
     elements.extensionEnabled.addEventListener("change", saveExtensionEnabledSetting);
     elements.select.addEventListener("click", () => runAction("CCM_SELECT_CONVERSATIONS"));
     elements.deselect.addEventListener("click", () => runAction("CCM_DESELECT_ALL"));
@@ -52,23 +59,32 @@
     bindUsageStorageRefresh();
   }
 
+  function populateLanguageOptions() {
+    const i18n = getI18n();
+    if (i18n && typeof i18n.populateLanguageSelect === "function") {
+      i18n.populateLanguageSelect(elements.language, currentLanguagePreference);
+    }
+  }
+
   async function refreshStatus() {
     try {
       const response = await sendToActiveTab({ type: "CCM_GET_STATUS" });
       renderStatus(response.status);
     } catch (error) {
       setStatus(isExtensionEnabled()
-        ? "Open or refresh https://chatgpt.com/, then try again."
-        : "Extension disabled. Turn it on to use controls.");
+        ? t("openRefreshChatgpt")
+        : t("extensionDisabledControls"));
     }
   }
 
   async function loadSettings() {
     try {
       const settings = await readSettings();
+      setLanguagePreference(settings.language || "auto");
       elements.extensionEnabled.checked = settings.extensionEnabled !== false;
       elements.contextEstimateEnabled.checked = settings.contextEstimateEnabled !== false;
     } catch (error) {
+      setLanguagePreference("auto");
       elements.extensionEnabled.checked = true;
       elements.contextEstimateEnabled.checked = true;
     }
@@ -76,13 +92,47 @@
     applyExtensionAvailability(false);
     applyContextEstimateAvailability(false);
     if (!isExtensionEnabled()) {
-      setStatus("Extension disabled. Turn it on to use controls.");
+      setStatus(t("extensionDisabledControls"));
+    }
+  }
+
+  async function saveLanguageSetting() {
+    const language = getLanguagePreferenceFromSelect();
+    setLanguagePreference(language);
+
+    try {
+      const settings = await readSettings();
+      settings.language = language;
+      await writeSettings(settings);
+    } catch (error) {
+      // Local file smoke tests do not provide chrome.storage.
+    }
+
+    try {
+      await sendToActiveTab({
+        type: "CCM_SET_LANGUAGE",
+        language
+      });
+    } catch (error) {
+      // The content script will also pick this up through chrome.storage.
+    }
+
+    if (lastStatus) {
+      renderStatus(lastStatus);
+    } else {
+      setStatus(t("languageUpdated"));
+    }
+    if (activeEstimate) {
+      renderEstimate(activeEstimate);
+    }
+    if (lastUsageStats) {
+      renderUsageStats(lastUsageStats);
     }
   }
 
   async function runAction(type) {
     if (!isExtensionEnabled()) {
-      setStatus("Extension is disabled. Turn it on to use controls.");
+      setStatus(t("extensionIsDisabledControls"));
       return;
     }
 
@@ -102,18 +152,18 @@
 
   async function estimateContext() {
     if (!isExtensionEnabled()) {
-      elements.estimateOutput.innerHTML = '<div class="warning">Extension is disabled.</div>';
-      setStatus("Extension is disabled. Turn it on to estimate context.");
+      elements.estimateOutput.innerHTML = `<div class="warning">${escapeHtml(t("extensionDisabledShort"))}</div>`;
+      setStatus(t("extensionIsDisabledEstimate"));
       return;
     }
 
     if (!isContextEstimateEnabled()) {
-      elements.estimateOutput.innerHTML = '<div class="warning">Context estimate is turned off.</div>';
+      elements.estimateOutput.innerHTML = `<div class="warning">${escapeHtml(t("contextEstimateOff"))}</div>`;
       return;
     }
 
     setBusy(true);
-    elements.estimateOutput.textContent = "Scanning conversation context...";
+    elements.estimateOutput.textContent = t("scanningContext");
 
     try {
       const selectedContextWindow = Number(elements.contextWindow.value || 128000);
@@ -141,7 +191,7 @@
     applyContextEstimateAvailability(false);
 
     if (!enabled) {
-      elements.estimateOutput.innerHTML = '<div class="warning">Context estimate is turned off.</div>';
+      elements.estimateOutput.innerHTML = `<div class="warning">${escapeHtml(t("contextEstimateOff"))}</div>`;
     }
 
     try {
@@ -170,14 +220,14 @@
         });
         renderStatus(response.status);
       } catch (error) {
-        setStatus(enabled ? "Extension enabled. Open or refresh ChatGPT to use it." : "Extension disabled.");
+        setStatus(enabled ? t("extensionEnabledOpenRefresh") : t("extensionDisabledShort"));
       }
     } finally {
       applyExtensionAvailability(false);
       applyContextEstimateAvailability(false);
       if (!enabled) {
-        elements.estimateOutput.innerHTML = '<div class="warning">Extension is disabled.</div>';
-        setStatus("Extension disabled.");
+        elements.estimateOutput.innerHTML = `<div class="warning">${escapeHtml(t("extensionDisabledShort"))}</div>`;
+        setStatus(t("extensionDisabledShort"));
       }
     }
   }
@@ -200,13 +250,13 @@
     }
 
     if (!activeEstimate) {
-      elements.estimateOutput.innerHTML = '<div class="warning">Run Estimate Context before adding a local PDF.</div>';
+      elements.estimateOutput.innerHTML = `<div class="warning">${escapeHtml(t("runEstimateBeforePdf"))}</div>`;
       return;
     }
 
     const analyzer = globalThis.ChatGPTCleanerPdfAnalyzer;
     if (!analyzer || typeof analyzer.analyzeFile !== "function") {
-      elements.estimateOutput.insertAdjacentHTML("afterbegin", '<div class="warning">Local PDF analyzer is not available in this popup.</div>');
+      elements.estimateOutput.insertAdjacentHTML("afterbegin", `<div class="warning">${escapeHtml(t("localPdfAnalyzerUnavailable"))}</div>`);
       return;
     }
 
@@ -230,12 +280,12 @@
         try {
           await writeLocalPdfEstimates(activeLocalPdfStorageKey || getEstimateStorageKey(activeEstimate), localPdfEstimates);
         } catch (error) {
-          failures.push(`Could not save local PDF estimates: ${error.message}`);
+          failures.push(t("couldNotSaveLocalPdfEstimates", { error: error.message }));
         }
       }
       renderEstimate(activeEstimate);
       if (added.length) {
-        setStatus(`Added ${formatNumber(added.length)} local PDF estimate${added.length === 1 ? "" : "s"}.`);
+        setStatus(t("addedLocalPdfEstimate", { count: formatNumber(added.length) }));
       }
       if (failures.length) {
         elements.estimateOutput.insertAdjacentHTML("afterbegin", `<div class="warning">${escapeHtml(failures.join(" "))}</div>`);
@@ -249,11 +299,11 @@
 
   async function analyzeLocalPdfFile(file, matchedMissing) {
     if (!/\.pdf$/i.test(file.name || "") && file.type !== "application/pdf") {
-      throw new Error("Choose a PDF file.");
+      throw new Error(t("choosePdfFile"));
     }
 
     if (file.size > LOCAL_PDF_LIMIT_BYTES) {
-      throw new Error("PDF is larger than the 20 MB local-analysis limit.");
+      throw new Error(t("pdfTooLarge"));
     }
 
     const selectedContextWindow = Number(activeEstimate.selectedContextWindow || activeEstimate.contextWindow || elements.contextWindow.value || 128000);
@@ -268,8 +318,8 @@
       key: `local:${Date.now()}:${file.name}`,
       matchedMissingKey: matchedMissing && matchedMissing.key ? matchedMissing.key : findMissingAttachmentKeyByName(file.name),
       name: matchedMissing && matchedMissing.name ? matchedMissing.name : (result.fileName || file.name || "Local PDF"),
-      source: "Local PDF upload",
-      status: "Counted",
+      source: t("localPdfUpload"),
+      status: t("counted"),
       tokens: textTokens + imageTokens,
       textTokens,
       imageTokens,
@@ -359,8 +409,8 @@
       key: String(raw.key || `local:${raw.name || "pdf"}`),
       matchedMissingKey: String(raw.matchedMissingKey || ""),
       name: String(raw.name || "Local PDF"),
-      source: "Local PDF upload",
-      status: "Counted",
+      source: t("localPdfUpload"),
+      status: t("counted"),
       tokens,
       textTokens: Number(raw.textTokens || 0),
       imageTokens: Number(raw.imageTokens || 0),
@@ -375,12 +425,12 @@
     try {
       renderUsageStats(await readUsageStats());
     } catch (error) {
-      elements.usageOutput.textContent = "Could not read local usage stats.";
+      elements.usageOutput.textContent = t("couldNotReadUsage");
     }
   }
 
   async function resetUsageStats() {
-    if (!confirm("Reset local usage counts?")) {
+    if (!confirm(t("resetUsageConfirm"))) {
       return;
     }
 
@@ -389,9 +439,9 @@
       const stats = createEmptyUsageStats();
       await writeUsageStats(stats);
       renderUsageStats(stats);
-      setStatus("Usage counts reset.");
+      setStatus(t("usageCountsReset"));
     } catch (error) {
-      setStatus("Could not reset local usage stats.");
+      setStatus(t("couldNotResetUsage"));
     } finally {
       setBusy(false);
     }
@@ -400,7 +450,7 @@
   async function sendToActiveTab(payload) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.id) {
-      throw new Error("No active tab found.");
+      throw new Error(t("noActiveTab"));
     }
 
     try {
@@ -409,12 +459,12 @@
       }, payload));
 
       if (!response || !response.ok) {
-        throw new Error(response && response.error ? response.error : "The content script did not respond.");
+        throw new Error(response && response.error ? response.error : t("contentNoRespond"));
       }
 
       return response;
     } catch (error) {
-      throw new Error("Open or refresh https://chatgpt.com/ before using this extension.");
+      throw new Error(t("openRefreshBeforeUse"));
     }
   }
 
@@ -423,20 +473,24 @@
       return;
     }
 
+    lastStatus = status;
     if (status.extensionEnabled === false) {
       elements.extensionEnabled.checked = false;
       applyExtensionAvailability(false);
-      setStatus("Extension disabled. Turn it on to use controls.");
+      setStatus(t("extensionDisabledControls"));
       return;
     }
 
     const visibleText = status.activated
-      ? `${formatNumber(status.selected)} selected / ${formatNumber(status.visible)} visible conversations`
-      : "Controls are ready. Selection starts only when you click Select conversations.";
+      ? t("selectedVisible", {
+        selected: formatNumber(status.selected),
+        visible: formatNumber(status.visible)
+      })
+      : t("controlsReady");
 
-    setStatus(status.isDeleting ? `Deleting... ${visibleText}` : visibleText);
+    setStatus(status.isDeleting ? t("deletingStatus", { text: visibleText }) : visibleText);
     if (status.currentModel) {
-      elements.currentModel.textContent = status.currentModel === "Unknown model" ? "Auto tracking" : status.currentModel;
+      elements.currentModel.textContent = status.currentModel === "Unknown model" ? t("autoTracking") : status.currentModel;
       elements.currentModel.title = status.currentModel;
     }
   }
@@ -453,16 +507,19 @@
     const selectedContextWindow = Number(adjustedEstimate.selectedContextWindow || adjustedEstimate.contextWindow || 128000);
     const methodLabel = formatEstimatorMethod(adjustedEstimate);
     elements.estimateOutput.innerHTML = `
-      <div class="metric"><span>Estimated scanned tokens</span><strong>${formatNumber(estimatedVisibleTokens)}</strong></div>
+      <div class="metric"><span>${escapeHtml(t("estimatedScannedTokens"))}</span><strong>${formatNumber(estimatedVisibleTokens)}</strong></div>
       ${renderVisibleTextBlock(adjustedEstimate)}
       ${renderCountedAttachments(adjustedEstimate.countedAttachments)}
       ${renderMissingAttachments(adjustedEstimate.missingAttachments)}
       ${renderEstimateWarnings(adjustedEstimate)}
-      <div class="metric"><span>Estimator</span><strong>${escapeHtml(methodLabel)}</strong></div>
-      <div class="meter" aria-label="Approximate scanned-page context usage">
+      <div class="metric"><span>${escapeHtml(t("estimator"))}</span><strong>${escapeHtml(methodLabel)}</strong></div>
+      <div class="meter" aria-label="${escapeAttribute(t("approximateUsageAria"))}">
         <div class="meter-fill" style="width: ${Math.min(percentage, 100).toFixed(2)}%"></div>
       </div>
-      <div class="warning">${percentage.toFixed(2)}% of selected ${formatNumber(selectedContextWindow)} token window. Scanned page only, not backend context.</div>
+      <div class="warning">${escapeHtml(t("contextUsageWarning", {
+        percentage: percentage.toFixed(2),
+        window: formatNumber(selectedContextWindow)
+      }))}</div>
     `;
   }
 
@@ -474,20 +531,26 @@
     const assistantTextTokens = Number(estimate.assistantTextTokens || 0);
     const otherTextTokens = Number(estimate.otherTextTokens || 0);
     const messageBreakdown = userMessages || assistantMessages || otherMessages
-      ? ` (${formatNumber(userMessages)} user | ${formatNumber(assistantMessages)} GPT output${otherMessages ? ` | ${formatNumber(otherMessages)} other` : ""})`
+      ? ` (${formatNumber(userMessages)} ${t("user")} | ${formatNumber(assistantMessages)} ${t("gptOutput")}${otherMessages ? ` | ${formatNumber(otherMessages)} ${t("other")}` : ""})`
       : "";
     const tokenBreakdown = userTextTokens || assistantTextTokens || otherTextTokens
-      ? `<span>User input ${formatNumber(userTextTokens)} tokens | GPT output ${formatNumber(assistantTextTokens)} tokens${otherTextTokens ? ` | Other ${formatNumber(otherTextTokens)} tokens` : ""}</span>`
+      ? `<span>${escapeHtml(t("userInput"))} ${formatNumber(userTextTokens)} tokens | ${escapeHtml(t("gptOutput"))} ${formatNumber(assistantTextTokens)} tokens${otherTextTokens ? ` | ${escapeHtml(t("otherTokens"))} ${formatNumber(otherTextTokens)} tokens` : ""}</span>`
       : "";
     const scanDetail = estimate.scanSteps
-      ? `<span>Scanned ${formatNumber(estimate.scanSteps)} scroll positions in ${escapeHtml(estimate.scanTarget || "page")}.</span>`
+      ? `<span>${escapeHtml(t("scannedPositions", {
+        steps: formatNumber(estimate.scanSteps),
+        target: estimate.scanTarget || t("page")
+      }))}</span>`
       : "";
 
     return `
       <div class="estimate-panel">
-        <h3>Scanned conversation text</h3>
-        <strong>${formatNumber(estimate.textTokens || 0)} estimated tokens</strong>
-        <span>${formatNumber(estimate.characters)} characters | ${formatNumber(estimate.messages)} messages${messageBreakdown}</span>
+        <h3>${escapeHtml(t("scannedConversationText"))}</h3>
+        <strong>${escapeHtml(t("estimatedTokens", { count: formatNumber(estimate.textTokens || 0) }))}</strong>
+        <span>${escapeHtml(t("textStats", {
+          characters: formatNumber(estimate.characters),
+          messages: formatNumber(estimate.messages)
+        }))}${escapeHtml(messageBreakdown)}</span>
         ${tokenBreakdown}
         ${scanDetail}
       </div>
@@ -502,7 +565,7 @@
 
     return `
       <div class="estimate-panel">
-        <h3>Counted attachments</h3>
+        <h3>${escapeHtml(t("countedAttachments"))}</h3>
         ${renderCollapsibleAttachmentList(items, renderCountedAttachment)}
       </div>
     `;
@@ -517,8 +580,8 @@
     return `
       <div class="estimate-panel">
         <div class="estimate-panel-heading">
-          <h3>Missing attachments</h3>
-          <button type="button" class="small-button" data-action="add-local-pdfs">Add local PDFs</button>
+          <h3>${escapeHtml(t("missingAttachments"))}</h3>
+          <button type="button" class="small-button" data-action="add-local-pdfs">${escapeHtml(t("addLocalPdfs"))}</button>
         </div>
         ${renderCollapsibleAttachmentList(items, renderMissingAttachment)}
       </div>
@@ -535,7 +598,7 @@
       </div>
       ${hiddenItems.length ? `
         <details class="attachment-more">
-          <summary>More (${formatNumber(hiddenItems.length)})</summary>
+          <summary>${escapeHtml(t("moreCount", { count: formatNumber(hiddenItems.length) }))}</summary>
           <div class="attachment-list">
             ${hiddenItems.map(renderItem).join("")}
           </div>
@@ -548,11 +611,11 @@
     return `
       <div class="attachment-item counted-attachment">
         <div>
-          <strong>${escapeHtml(attachment.name || "Attachment")}</strong>
-          <span>Source: ${escapeHtml(attachment.source || "Visible page attachment")}</span>
+          <strong>${escapeHtml(attachment.name || t("attachment"))}</strong>
+          <span>${escapeHtml(t("source"))}: ${escapeHtml(attachment.source || t("visiblePageAttachment"))}</span>
           ${renderAttachmentDetails(attachment)}
         </div>
-        <b>${formatNumber(attachment.tokens)} estimated tokens</b>
+        <b>${escapeHtml(t("estimatedTokensShort", { count: formatNumber(attachment.tokens) }))}</b>
       </div>
     `;
   }
@@ -561,9 +624,9 @@
     return `
       <div class="attachment-item missing-attachment">
         <div>
-          <strong>${escapeHtml(attachment.name || "PDF file")}</strong>
-          <span>Status: ${escapeHtml(attachment.status || "Not counted")}</span>
-          <span>Reason: ${escapeHtml(attachment.reason || "File content is not available to the browser.")}</span>
+          <strong>${escapeHtml(attachment.name || t("pdfFile"))}</strong>
+          <span>${escapeHtml(t("status"))}: ${escapeHtml(attachment.status || t("notCounted"))}</span>
+          <span>${escapeHtml(t("reason"))}: ${escapeHtml(attachment.reason || t("fileContentUnavailable"))}</span>
         </div>
       </div>
     `;
@@ -572,12 +635,12 @@
   function renderAttachmentDetails(attachment) {
     const details = [];
     if (attachment.kind === "pdf") {
-      details.push(`${formatNumber(attachment.textTokens || 0)} text tokens`);
+      details.push(t("textTokens", { count: formatNumber(attachment.textTokens || 0) }));
       if (Number(attachment.imageTokens || 0) > 0) {
-        details.push(`${formatNumber(attachment.imageTokens)} image tokens`);
+        details.push(t("imageTokens", { count: formatNumber(attachment.imageTokens) }));
       }
       if (Number(attachment.pages || 0) > 0) {
-        details.push(`${formatNumber(attachment.pages)} pages`);
+        details.push(t("pages", { count: formatNumber(attachment.pages) }));
       }
     } else if (attachment.kind === "image" && attachment.width && attachment.height) {
       details.push(`${formatNumber(attachment.width)} x ${formatNumber(attachment.height)}`);
@@ -589,11 +652,11 @@
   function renderEstimateWarnings(estimate) {
     const rows = [];
     if (estimate.mediaTimedOut) {
-      rows.push('<div class="warning">Media/PDF analysis timed out; showing the visible text estimate first.</div>');
+      rows.push(`<div class="warning">${escapeHtml(t("mediaTimedOut"))}</div>`);
     }
 
     if (estimate.mediaError) {
-      rows.push(`<div class="warning">Media/PDF analysis failed: ${escapeHtml(estimate.mediaError)}</div>`);
+      rows.push(`<div class="warning">${escapeHtml(t("mediaFailed", { error: estimate.mediaError }))}</div>`);
     }
 
     return rows.join("");
@@ -656,10 +719,10 @@
 
   function formatEstimatorMethod(estimate) {
     if (estimate && estimate.tokenizerUsed) {
-      return "gpt-tokenizer local";
+      return t("gptTokenizerLocal");
     }
 
-    return "Local fallback";
+    return t("localFallback");
   }
 
   function isContextEstimateEnabled() {
@@ -694,17 +757,18 @@
   }
 
   function renderUsageStats(stats) {
+    lastUsageStats = stats;
     const usage = normalizeUsageStats(stats);
     const categoryRows = [
       {
         label: "GPT",
         total: Number(usage.categories.GPT?.total || 0),
-        title: "Regular GPT model sends"
+        title: t("regularGptSends")
       },
       {
         label: "GPT Pro",
         total: Number(usage.categories["GPT Pro"]?.total || 0),
-        title: "GPT Pro model sends"
+        title: t("gptProSends")
       }
     ];
     const modelRows = Object.entries(usage.models)
@@ -713,11 +777,11 @@
         total: Number(value.total || 0),
         lastUsedAt: value.lastUsedAt || ""
       }))
-      .filter((item) => item.total > 0)
+      .filter((item) => item.total > 0 && isKnownUsageModelLabel(item.label))
       .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
 
     elements.usageOutput.innerHTML = `
-      <div class="metric"><span>Tracked sends</span><strong>${formatNumber(usage.total)}</strong></div>
+      <div class="metric"><span>${escapeHtml(t("trackedSends"))}</span><strong>${formatNumber(usage.total)}</strong></div>
       <div class="usage-list usage-categories">
         ${categoryRows.map((row) => `
           <div class="usage-row usage-category-row" title="${escapeHtml(row.title)}">
@@ -727,7 +791,7 @@
         `).join("")}
       </div>
       ${modelRows.length ? `
-        <div class="usage-subtitle">Model details</div>
+        <div class="usage-subtitle">${escapeHtml(t("modelDetails"))}</div>
         <div class="usage-list">
           ${modelRows.map((row) => `
             <div class="usage-row" title="${escapeHtml(row.label)}">
@@ -736,8 +800,13 @@
             </div>
           `).join("")}
         </div>
-      ` : '<div class="warning">No usage counted yet. Send a ChatGPT message; counting is automatic.</div>'}
+      ` : usage.total > 0 ? "" : `<div class="warning">${escapeHtml(t("noUsageYet"))}</div>`}
     `;
+  }
+
+  function isKnownUsageModelLabel(label) {
+    const source = String(label || "").trim();
+    return Boolean(source) && !/^unknown model$/i.test(source);
   }
 
   function setStatus(message) {
@@ -767,8 +836,55 @@
     return document.getElementById(id);
   }
 
+  function getI18n() {
+    return globalThis.ChatGPTCleanerI18n || null;
+  }
+
+  function t(key, params = {}) {
+    const i18n = getI18n();
+    return i18n && typeof i18n.t === "function"
+      ? i18n.t(key, params, currentLanguage)
+      : key;
+  }
+
+  function setLanguagePreference(language) {
+    const i18n = getI18n();
+    currentLanguagePreference = i18n && typeof i18n.normalizeLanguage === "function"
+      ? i18n.normalizeLanguage(language || "auto")
+      : "en";
+    currentLanguage = i18n && typeof i18n.resolveLanguage === "function"
+      ? i18n.resolveLanguage(currentLanguagePreference)
+      : currentLanguagePreference;
+
+    if (elements.language) {
+      elements.language.value = currentLanguagePreference;
+    }
+
+    document.documentElement.lang = currentLanguage;
+    document.documentElement.dir = i18n && typeof i18n.getDirection === "function"
+      ? i18n.getDirection(currentLanguage)
+      : "ltr";
+    applyStaticText();
+  }
+
+  function getLanguagePreferenceFromSelect() {
+    return elements.language && elements.language.value ? elements.language.value : "auto";
+  }
+
+  function applyStaticText() {
+    document.querySelectorAll("[data-i18n]").forEach((element) => {
+      element.textContent = t(element.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
+      element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
+    });
+  }
+
   function formatNumber(value) {
-    return new Intl.NumberFormat().format(Number(value || 0));
+    const i18n = getI18n();
+    return i18n && typeof i18n.formatNumber === "function"
+      ? i18n.formatNumber(value, currentLanguage)
+      : new Intl.NumberFormat().format(Number(value || 0));
   }
 
   function createEmptyUsageStats() {

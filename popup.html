@@ -9,35 +9,43 @@
 <body>
   <main class="popup">
     <header class="popup-header">
-      <h1>ChatGPT Context Viewer</h1>
-      <p>Batch delete and estimate visible context locally.</p>
+      <h1 data-i18n="appTitle">ChatGPT Context Viewer</h1>
+      <p data-i18n="appSubtitle">Batch delete and estimate visible context locally.</p>
     </header>
 
-    <section class="section" aria-label="Extension status">
+    <section class="section" data-i18n-aria-label="languageLabel" aria-label="Interface language">
+      <label class="field">
+        <span data-i18n="languageLabel">Interface language</span>
+        <select id="language-select"></select>
+      </label>
+      <p class="warning" data-i18n="languageHelp">Changes the popup and extension messages on ChatGPT.</p>
+    </section>
+
+    <section class="section" data-i18n-aria-label="extensionStatusAria" aria-label="Extension status">
       <label class="toggle-row">
         <input id="extension-enabled" type="checkbox" checked />
-        <span>Enable extension</span>
+        <span data-i18n="enableExtension">Enable extension</span>
       </label>
-      <p class="warning">Turn off to pause sidebar controls, context estimates, deletion, and automatic usage counting.</p>
+      <p class="warning" data-i18n="extensionPauseWarning">Turn off to pause sidebar controls, context estimates, deletion, and automatic usage counting.</p>
     </section>
 
-    <section class="section" aria-label="Conversation controls">
+    <section class="section" data-i18n-aria-label="conversationControlsAria" aria-label="Conversation controls">
       <div class="button-grid">
-        <button type="button" id="select-conversations">Select conversations</button>
-        <button type="button" id="deselect-all">Deselect all</button>
-        <button type="button" id="delete-selected" class="danger">Delete selected</button>
-        <button type="button" id="refresh-list">Refresh list</button>
+        <button type="button" id="select-conversations" data-i18n="selectConversations">Select conversations</button>
+        <button type="button" id="deselect-all" data-i18n="deselectAll">Deselect all</button>
+        <button type="button" id="delete-selected" class="danger" data-i18n="deleteSelected">Delete selected</button>
+        <button type="button" id="refresh-list" data-i18n="refreshList">Refresh list</button>
       </div>
-      <p class="status" id="conversation-status">Open a ChatGPT tab, then use the controls.</p>
+      <p class="status" id="conversation-status" data-i18n="initialStatus">Open a ChatGPT tab, then use the controls.</p>
     </section>
 
-    <section class="section" aria-label="Context estimate">
+    <section class="section" data-i18n-aria-label="contextEstimateAria" aria-label="Context estimate">
       <label class="toggle-row">
         <input id="context-estimate-enabled" type="checkbox" checked />
-        <span>Enable context estimate</span>
+        <span data-i18n="enableContextEstimate">Enable context estimate</span>
       </label>
       <label class="field">
-        <span>Context window</span>
+        <span data-i18n="contextWindow">Context window</span>
         <select id="context-window">
           <option value="16000">16K</option>
           <option value="32000">32K</option>
@@ -48,26 +56,27 @@
           <option value="1000000">1M</option>
         </select>
       </label>
-      <button type="button" id="estimate-context" class="wide">Estimate Context</button>
+      <button type="button" id="estimate-context" class="wide" data-i18n="estimateContext">Estimate Context</button>
       <input id="local-pdf-input" class="hidden" type="file" accept="application/pdf,.pdf" multiple />
       <div id="estimate-output" class="estimate-output" aria-live="polite"></div>
     </section>
 
-    <section class="section" aria-label="Usage counter">
+    <section class="section" data-i18n-aria-label="usageCounterAria" aria-label="Usage counter">
       <div class="section-heading">
-        <h2>Usage Counter</h2>
-        <span id="current-model" class="pill">Model unknown</span>
+        <h2 data-i18n="usageCounter">Usage Counter</h2>
+        <span id="current-model" class="pill" data-i18n="modelUnknown">Model unknown</span>
       </div>
       <div class="button-grid">
-        <button type="button" id="refresh-usage">Refresh usage</button>
-        <button type="button" id="reset-usage" class="danger">Reset usage</button>
+        <button type="button" id="refresh-usage" data-i18n="refreshUsage">Refresh usage</button>
+        <button type="button" id="reset-usage" class="danger" data-i18n="resetUsage">Reset usage</button>
       </div>
       <div id="usage-output" class="usage-output" aria-live="polite"></div>
-      <p class="warning">Counts start after the extension is installed and rely on visible ChatGPT UI labels.</p>
+      <p class="warning" data-i18n="usageWarning">Counts start after the extension is installed and rely on visible ChatGPT UI labels.</p>
     </section>
 
   </main>
 
+  <script src="i18n.js"></script>
   <script src="vendor/chatgpt-cleaner-tokenizer.js"></script>
   <script src="vendor/chatgpt-cleaner-pdf-analyzer.js"></script>
   <script src="popup.js"></script>
